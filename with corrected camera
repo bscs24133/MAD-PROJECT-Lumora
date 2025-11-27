@@ -1,0 +1,2752 @@
+import 'dart:io';
+import 'dart:math';
+import 'package:flutter/material.dart';
+import 'package:camera/camera.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:image/image.dart' as img;
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(LumoraAppWithAuth());
+}
+// ===============================================
+// AUTHENTICATION WRAPPER & AUTH SCREENS
+// ===============================================
+
+class LumoraAppWithAuth extends StatefulWidget {
+  @override
+  State<LumoraAppWithAuth> createState() => _LumoraAppWithAuthState();
+}
+
+class _LumoraAppWithAuthState extends State<LumoraAppWithAuth> {
+  bool isLoading = true;
+  bool isLoggedIn = false;
+
+  @override
+  void initState() {
+    super.initState();
+    checkLogin();
+  }
+
+  void checkLogin() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    isLoggedIn = prefs.getBool("loggedIn") ?? false;
+    setState(() => isLoading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Lumora',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: Colors.black,
+      ),
+      home: isLoading
+          ? Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: CircularProgressIndicator(color: Color(0xFF3B82F6)),
+        ),
+      )
+          : isLoggedIn
+          ? const HomeScreen() // Goes to second code's HomeScreen
+          : AuthIntroScreen(), // Shows auth flow first
+    );
+  }
+}
+/// ---------------------------
+/// USER INFO LIST (Long Press Delete)
+/// ---------------------------
+class UserInfoListScreen extends StatefulWidget {
+  @override
+  State<UserInfoListScreen> createState() => _UserInfoListScreenState();
+}
+
+class _UserInfoListScreenState extends State<UserInfoListScreen> {
+  List<Map> users = [];
+  String? currentUserEmail;
+
+  @override
+  void initState() {
+    super.initState();
+    loadUsers();
+  }
+
+  Future<void> loadUsers() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String> saved = prefs.getStringList("users") ?? [];
+    currentUserEmail = prefs.getString("activeEmail");
+    users = saved.map((e) => jsonDecode(e) as Map).toList();
+    setState(() {});
+  }
+
+  Future<void> deleteUser(int index) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String> saved = prefs.getStringList("users") ?? [];
+
+    saved.removeAt(index);
+    prefs.setStringList("users", saved);
+
+    // If deleted user is the current user, log out
+    if (users[index]["email"] == currentUserEmail) {
+      prefs.setBool("loggedIn", false);
+      prefs.remove("activeEmail");
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => AuthIntroScreen()),
+            (route) => false,
+      );
+    } else {
+      loadUsers();
+    }
+  }
+
+  void showDeleteDialog(int index) {
+    bool isCurrentUser = users[index]["email"] == currentUserEmail;
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF0F1A2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+            SizedBox(width: 12),
+            Text(
+              "Delete Account?",
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Are you sure you want to delete this account?",
+              style: TextStyle(color: Colors.white70, fontSize: 16),
+            ),
+            if (isCurrentUser) ...[
+              SizedBox(height: 12),
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.red, size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "This is your active account. You'll be logged out.",
+                        style: TextStyle(color: Colors.red, fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          // NO BUTTON
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: Colors.white54),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+            child: Text("Cancel", style: TextStyle(color: Colors.white, fontSize: 16)),
+            onPressed: () {
+              Navigator.pop(context);
+            },
+          ),
+          // YES BUTTON
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+            child: Text("Delete", style: TextStyle(color: Colors.white, fontSize: 16)),
+            onPressed: () {
+              deleteUser(index);
+              Navigator.pop(context);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0F1A2E),
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Row(
+          children: [
+            Icon(Icons.people, color: Color(0xFF60A5FA)),
+            SizedBox(width: 12),
+            Text("User Accounts", style: TextStyle(color: Colors.white)),
+          ],
+        ),
+      ),
+      body: users.isEmpty
+          ? Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.people_outline, size: 80, color: Colors.white24),
+            SizedBox(height: 20),
+            Text(
+              "No accounts found",
+              style: TextStyle(color: Colors.white54, fontSize: 18),
+            ),
+            SizedBox(height: 8),
+            Text(
+              "Create an account to get started",
+              style: TextStyle(color: Colors.white38, fontSize: 14),
+            ),
+          ],
+        ),
+      )
+          : ListView.builder(
+        padding: EdgeInsets.all(16),
+        itemCount: users.length,
+        itemBuilder: (context, i) {
+          bool isCurrentUser = users[i]["email"] == currentUserEmail;
+
+          return GestureDetector(
+            onLongPress: () => showDeleteDialog(i),
+            child: Container(
+              margin: EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isCurrentUser
+                      ? [Color(0xFF1E3A8A), Color(0xFF1E40AF)]
+                      : [Color(0xFF0F1A2E), Color(0xFF1C2A47)],
+                ),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: isCurrentUser
+                      ? Color(0xFF3B82F6).withOpacity(0.5)
+                      : Colors.white12,
+                  width: 2,
+                ),
+              ),
+              child: ListTile(
+                contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                leading: Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: isCurrentUser
+                          ? [Color(0xFF60A5FA), Color(0xFF3B82F6)]
+                          : [Color(0xFF374151), Color(0xFF1F2937)],
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    isCurrentUser ? Icons.person : Icons.person_outline,
+                    color: Colors.white,
+                    size: 28,
+                  ),
+                ),
+                title: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        users[i]["name"],
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    if (isCurrentUser)
+                      Container(
+                        padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Color(0xFF3B82F6),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          "Active",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    users[i]["email"],
+                    style: TextStyle(color: Colors.white70, fontSize: 14),
+                  ),
+                ),
+                trailing: Icon(
+                  Icons.more_vert,
+                  color: Colors.white54,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+      bottomNavigationBar: Container(
+        padding: EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Color(0xFF0F1A2E),
+          border: Border(top: BorderSide(color: Colors.white12)),
+        ),
+        child: SafeArea(
+          child: Text(
+            "💡 Long press any account to delete",
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.white54, fontSize: 13),
+          ),
+        ),
+      ),
+    );
+  }
+}
+// ===============================================
+// AUTH INTRO SCREEN
+// ===============================================
+
+class AuthIntroScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // Eye Icon
+              Container(
+                width: 120,
+                height: 120,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF60A5FA), Color(0xFF3B82F6)],
+                  ),
+                  borderRadius: BorderRadius.circular(30),
+                ),
+                child: Icon(Icons.remove_red_eye, size: 60, color: Colors.white),
+              ),
+              SizedBox(height: 50),
+
+              // Lumora Title
+              Text(
+                "LUMORA",
+                style: TextStyle(
+                  fontSize: 56,
+                  fontWeight: FontWeight.w900,
+                  color: Colors.white,
+                  letterSpacing: 2,
+                ),
+              ),
+              SizedBox(height: 10),
+
+              // Subtitle
+              Container(
+                width: 150,
+                height: 2,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Colors.transparent, Color(0xFF3B82F6), Colors.transparent],
+                  ),
+                ),
+              ),
+              SizedBox(height: 20),
+              Text(
+                "Discover the colour around you",
+                style: TextStyle(color: Colors.white70, fontSize: 16),
+              ),
+              SizedBox(height: 80),
+
+              // Get Started Button
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 40),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 60,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Color(0xFF3B82F6),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => AuthWelcomeScreen()),
+                      );
+                    },
+                    child: Text(
+                      "Get Started",
+                      style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ===============================================
+// AUTH WELCOME SCREEN
+// ===============================================
+
+class AuthWelcomeScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 100,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF60A5FA), Color(0xFF3B82F6)],
+                    ),
+                    borderRadius: BorderRadius.circular(24),
+                  ),
+                  child: Icon(Icons.remove_red_eye, size: 50, color: Colors.white),
+                ),
+                SizedBox(height: 40),
+
+                Text(
+                  "Welcome to Lumora",
+                  style: TextStyle(
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                SizedBox(height: 16),
+                Text(
+                  "Sign in to save your colour discoveries\nand personalize your experience",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white70, fontSize: 16),
+                ),
+                SizedBox(height: 60),
+
+                // Log In Button
+                SizedBox(
+                  width: double.infinity,
+                  height: 60,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Color(0xFF3B82F6),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => AuthLoginScreen()),
+                      );
+                    },
+                    child: Text(
+                      "Log In",
+                      style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 16),
+
+                // Sign Up Button
+                SizedBox(
+                  width: double.infinity,
+                  height: 60,
+                  child: OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: Colors.white54, width: 2),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => AuthSignUpScreen()),
+                      );
+                    },
+                    child: Text(
+                      "Sign Up",
+                      style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 32),
+
+                // Skip Button
+                TextButton(
+                  onPressed: () {
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(builder: (_) => const HomeScreen()),
+                    );
+                  },
+                  child: Text(
+                    "Skip for now",
+                    style: TextStyle(color: Colors.white70, fontSize: 16),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ===============================================
+// LOGIN SCREEN
+// ===============================================
+
+class AuthLoginScreen extends StatelessWidget {
+  final email = TextEditingController();
+  final pass = TextEditingController();
+
+  Future<bool> loginUser() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String> saved = prefs.getStringList("users") ?? [];
+
+    for (var u in saved) {
+      Map user = jsonDecode(u);
+      if (user["email"] == email.text.trim() &&
+          user["password"] == pass.text.trim()) {
+        prefs.setBool("loggedIn", true);
+        prefs.setString("activeEmail", user["email"]);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text("Log In", style: TextStyle(color: Colors.white)),
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              authInputField("Email", email),
+              SizedBox(height: 20),
+              authInputField("Password", pass, obscure: true),
+              SizedBox(height: 40),
+
+              SizedBox(
+                width: double.infinity,
+                height: 60,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Color(0xFF3B82F6),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  child: Text(
+                    "Log In",
+                    style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: () async {
+                    bool ok = await loginUser();
+                    if (ok) {
+                      Navigator.pushAndRemoveUntil(
+                        context,
+                        MaterialPageRoute(builder: (_) => const HomeScreen()),
+                            (route) => false,
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text("Invalid credentials"),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ===============================================
+// SIGN UP SCREEN
+// ===============================================
+
+class AuthSignUpScreen extends StatelessWidget {
+  final name = TextEditingController();
+  final email = TextEditingController();
+  final pass = TextEditingController();
+
+  Future<void> saveNewUser(String name, String email, String pass) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String> saved = prefs.getStringList("users") ?? [];
+
+    Map<String, dynamic> newUser = {
+      "name": name,
+      "email": email,
+      "password": pass,
+    };
+
+    saved.add(jsonEncode(newUser));
+    prefs.setStringList("users", saved);
+
+    prefs.setBool("loggedIn", true);
+    prefs.setString("activeEmail", email);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        leading: IconButton(
+          icon: Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text("Sign Up", style: TextStyle(color: Colors.white)),
+      ),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(24.0),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              authInputField("Full Name", name),
+              SizedBox(height: 20),
+              authInputField("Email", email),
+              SizedBox(height: 20),
+              authInputField("Password", pass, obscure: true),
+              SizedBox(height: 40),
+
+              SizedBox(
+                width: double.infinity,
+                height: 60,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Color(0xFF3B82F6),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                  child: Text(
+                    "Create Account",
+                    style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold),
+                  ),
+                  onPressed: () async {
+                    await saveNewUser(
+                      name.text.trim(),
+                      email.text.trim(),
+                      pass.text.trim(),
+                    );
+
+                    Navigator.pushAndRemoveUntil(
+                      context,
+                      MaterialPageRoute(builder: (_) => const HomeScreen()),
+                          (route) => false,
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ===============================================
+// AUTH INPUT FIELD HELPER
+// ===============================================
+
+Widget authInputField(String label, TextEditingController c, {bool obscure = false}) {
+  return TextField(
+    controller: c,
+    obscureText: obscure,
+    style: TextStyle(color: Colors.white),
+    decoration: InputDecoration(
+      labelText: label,
+      labelStyle: TextStyle(color: Colors.white70),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.white30),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Color(0xFF3B82F6), width: 2),
+      ),
+      filled: true,
+      fillColor: Color(0xFF1C1C1E),
+    ),
+  );
+}
+
+// ===============================================
+// END OF AUTH SCREENS
+// ===============================================
+class LumoraAppMain extends StatelessWidget {
+  const LumoraAppMain({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Lumora',
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: Colors.black,
+      ),
+      home: const HomeScreen(),
+    );
+  }
+}
+
+/// -------------------
+/// HOME SCREEN
+/// -------------------
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      drawer: Drawer(
+        backgroundColor: const Color(0xFF0F1A2E),
+        child: Column(
+          children: [
+            DrawerHeader(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF0A1128), Color(0xFF0F1A2E)],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Container(
+                    width: 48,
+                    height: 48,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF60A5FA), Color(0xFF3B82F6)],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.palette, color: Colors.white, size: 24),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    "Lumora",
+                    style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
+                  const Text(
+                    "Color Detection Pro",
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.history, color: Colors.white70),
+              title: const Text('History', style: TextStyle(color: Colors.white, fontSize: 16)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const HistoryScreen()));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.psychology, color: Colors.white70),
+              title: const Text('Color Vision Test', style: TextStyle(color: Colors.white, fontSize: 16)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const ColorVisionTest()));
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings, color: Colors.white70),
+              title: const Text('Settings', style: TextStyle(color: Colors.white, fontSize: 16)),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context, MaterialPageRoute(builder: (_) => const SettingsScreen()));
+              },
+            ),
+            const Divider(color: Colors.white24, thickness: 1, indent: 16, endIndent: 16),
+            ListTile(
+              leading: const Icon(Icons.logout, color: Colors.white70),
+              title: const Text('Log Out', style: TextStyle(color: Colors.white, fontSize: 16)),
+              onTap: () async {
+                SharedPreferences prefs = await SharedPreferences.getInstance();
+                prefs.setBool("loggedIn", false);
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  MaterialPageRoute(builder: (_) => AuthIntroScreen()),
+                      (route) => false,
+                );
+              },
+            ),
+            const Spacer(),
+            const Padding(
+              padding: EdgeInsets.all(16),
+              child: Text(
+                'Lumora v1.0.0\n© 2024 Lumora Technologies',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white38, fontSize: 10),
+              ),
+            ),
+          ],
+        ),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            // Top Bar
+            Container(
+              height: 80,
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: Color(0xFF1F1F1F))),
+              ),
+              child: Row(
+                children: [
+                  // Menu Button
+                  Builder(
+                    builder: (context) => Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF3B82F6).withOpacity(0.2),
+                        border: Border.all(color: const Color(0xFF3B82F6).withOpacity(0.4), width: 2),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: IconButton(
+                        icon: const Icon(Icons.menu, color: Color(0xFF60A5FA), size: 28),
+                        onPressed: () => Scaffold.of(context).openDrawer(),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  // Logo and Status
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF60A5FA), Color(0xFF3B82F6)],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.palette, color: Colors.white, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Lumora',
+                        style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                      ),
+                      Row(
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF3B82F6),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          const Text(
+                            'Ready to Scan',
+                            style: TextStyle(color: Colors.white54, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const Spacer(),
+                  GestureDetector(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => UserInfoListScreen()),
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF3B82F6).withOpacity(0.1),
+                        border: Border.all(color: const Color(0xFF3B82F6).withOpacity(0.2)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        children: const [
+                          Text(
+                            'Pro Mode',
+                            style: TextStyle(color: Color(0xFF60A5FA), fontSize: 12, fontWeight: FontWeight.w600),
+                          ),
+                          SizedBox(width: 4),
+                          Icon(Icons.people, color: Color(0xFF60A5FA), size: 14),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Container(
+                    width: 40,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF374151), Color(0xFF1F2937)],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF4B5563)),
+                    ),
+                    child: const Icon(Icons.person, color: Color(0xFF9CA3AF), size: 20),
+                  ),
+                ],
+              ),
+            ),
+
+            // Main Content
+            Expanded(
+              child: Center(
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Welcome Section
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          Icon(Icons.auto_awesome, color: Color(0xFF60A5FA), size: 24),
+                          SizedBox(width: 8),
+                          Text(
+                            'WELCOME TO',
+                            style: TextStyle(
+                              color: Color(0xFF60A5FA),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 2,
+                            ),
+                          ),
+                          SizedBox(width: 8),
+                          Icon(Icons.auto_awesome, color: Color(0xFF60A5FA), size: 24),
+                        ],
+                      ),
+                      const SizedBox(height: 24),
+                      const Text(
+                        'LUMORA',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 72,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -2,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        width: 200,
+                        height: 2,
+                        decoration: const BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [Colors.transparent, Color(0xFF3B82F6), Colors.transparent],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      const Text(
+                        'Advanced Color Vision & Detection System',
+                        style: TextStyle(color: Colors.white54, fontSize: 18, fontWeight: FontWeight.w300),
+                      ),
+                      const SizedBox(height: 12),
+                      const Text(
+                        'Identify colors with precision • Test your vision • Explore palettes',
+                        style: TextStyle(color: Colors.white38, fontSize: 12),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 60),
+
+                      // Action Cards
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 24),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: () async {
+                                  final status = await Permission.camera.request();
+                                  if (status.isGranted) {
+                                    final cameras = await availableCameras();
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => CameraScannerPage(cameras: cameras),
+                                      ),
+                                    );
+                                  }
+                                },
+                                child: _buildActionCard(
+                                  icon: Icons.camera_alt,
+                                  title: 'Camera',
+                                  description: 'Point and scan any object to detect colors instantly in real-time',
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            Expanded(
+                              child: GestureDetector(
+                                onTap: () async {
+                                  final picker = ImagePicker();
+                                  final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+                                  if (image != null) {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (_) => UploadResultScreen(imageFile: File(image.path)),
+                                      ),
+                                    );
+                                  }
+                                },
+                                child: _buildActionCard(
+                                  icon: Icons.upload_file,
+                                  title: 'Upload',
+                                  description: 'Upload images to extract and analyze complete color palettes',
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 60),
+
+                      // Stats
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _buildStat('16M+', 'Colors'),
+                          Container(width: 1, height: 48, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 24)),
+                          _buildStat('99%', 'Accuracy'),
+                          Container(width: 1, height: 48, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 24)),
+                          _buildStat('Instant', 'Detection'),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActionCard({required IconData icon, required String title, required String description}) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0A1128), Color(0xFF0F1A2E)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFF1E40AF).withOpacity(0.3), width: 2),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF60A5FA), Color(0xFF3B82F6)],
+              ),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Icon(icon, color: Colors.white, size: 40),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            title,
+            style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            description,
+            style: const TextStyle(color: Colors.white54, fontSize: 13),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStat(String value, String label) {
+    return Column(
+      children: [
+        Text(value, style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+      ],
+    );
+  }
+}
+
+/// ---------------------------
+/// CAMERA SCANNER
+/// ---------------------------
+class CameraScannerPage extends StatefulWidget {
+  final List<CameraDescription> cameras;
+  const CameraScannerPage({required this.cameras, super.key});
+
+  @override
+  State<CameraScannerPage> createState() => _CameraScannerPageState();
+}
+
+class _CameraScannerPageState extends State<CameraScannerPage> {
+  Color? detectedColor;
+  String detectedColorName = "Tap to detect color";
+  String detectedHex = "";
+  String detectedRgb = "";
+  Offset? lastTapPosition;
+
+  CameraController? controller;
+  bool isReady = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initCamera();
+  }
+
+  Future<void> _initCamera() async {
+    controller = CameraController(widget.cameras.first, ResolutionPreset.high);
+    await controller!.initialize();
+    if (!mounted) return;
+    setState(() => isReady = true);
+  }
+
+  Future<void> _capture() async {
+    if (controller == null || !controller!.value.isInitialized) return;
+    final file = await controller!.takePicture();
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => UploadResultScreen(imageFile: File(file.path))),
+    );
+  }
+  String _getShadeName(int r, int g, int b) {
+    // Comprehensive color database with 250+ colors
+    final Map<String, List<int>> colorDatabase = {
+      // ==================== REDS ====================
+      'Red': [255, 0, 0],
+      'Dark Red': [139, 0, 0],
+      'Crimson': [220, 20, 60],
+      'Maroon': [128, 0, 0],
+      'Firebrick': [178, 34, 34],
+      'Indian Red': [205, 92, 92],
+      'Light Coral': [240, 128, 128],
+      'Salmon': [250, 128, 114],
+      'Dark Salmon': [233, 150, 122],
+      'Light Salmon': [255, 160, 122],
+      'Tomato': [255, 99, 71],
+      'Cherry Red': [222, 49, 99],
+      'Ruby Red': [155, 17, 30],
+      'Raspberry': [227, 11, 92],
+      'Wine Red': [114, 47, 55],
+      'Burgundy': [128, 0, 32],
+      'Blood Red': [102, 0, 0],
+      'Candy Apple Red': [255, 8, 0],
+      'Ferrari Red': [255, 40, 0],
+      'Rose Red': [194, 30, 86],
+
+      // ==================== ORANGES ====================
+      'Orange': [255, 165, 0],
+      'Dark Orange': [255, 140, 0],
+      'Orange Red': [255, 69, 0],
+      'Tomato Orange': [255, 99, 71],
+      'Coral': [255, 127, 80],
+      'Light Coral': [240, 128, 128],
+      'Peach': [255, 218, 185],
+      'Peach Puff': [255, 218, 185],
+      'Apricot': [251, 206, 177],
+      'Mango': [255, 130, 67],
+      'Tangerine': [242, 133, 0],
+      'Burnt Orange': [204, 85, 0],
+      'Rust': [183, 65, 14],
+      'Carrot': [237, 145, 33],
+      'Pumpkin': [255, 117, 24],
+      'Marigold': [234, 162, 33],
+      'Amber': [255, 191, 0],
+      'Safety Orange': [255, 120, 0],
+      'Persimmon': [236, 88, 0],
+      'Honey': [235, 160, 35],
+
+      // ==================== YELLOWS ====================
+      'Yellow': [255, 255, 0],
+      'Light Yellow': [255, 255, 224],
+      'Lemon': [255, 247, 0],
+      'Lemon Chiffon': [255, 250, 205],
+      'Gold': [255, 215, 0],
+      'Golden': [255, 223, 0],
+      'Khaki': [240, 230, 140],
+      'Dark Khaki': [189, 183, 107],
+      'Cream': [255, 253, 208],
+      'Ivory': [255, 255, 240],
+      'Canary Yellow': [255, 255, 153],
+      'Banana': [255, 225, 53],
+      'Mustard': [255, 219, 88],
+      'Goldenrod': [218, 165, 32],
+      'Dark Goldenrod': [184, 134, 11],
+      'Corn': [251, 236, 93],
+      'Butter': [255, 255, 181],
+      'Saffron': [244, 196, 48],
+      'Daffodil': [255, 255, 49],
+      'Dandelion': [255, 218, 71],
+
+      // ==================== GREENS ====================
+      'Green': [0, 128, 0],
+      'Dark Green': [0, 100, 0],
+      'Forest Green': [34, 139, 34],
+      'Lime': [0, 255, 0],
+      'Lime Green': [50, 205, 50],
+      'Light Green': [144, 238, 144],
+      'Pale Green': [152, 251, 152],
+      'Spring Green': [0, 255, 127],
+      'Medium Spring Green': [0, 250, 154],
+      'Sea Green': [46, 139, 87],
+      'Medium Sea Green': [60, 179, 113],
+      'Mint': [189, 252, 201],
+      'Mint Green': [152, 255, 152],
+      'Mint Cream': [245, 255, 250],
+      'Olive': [128, 128, 0],
+      'Olive Drab': [107, 142, 35],
+      'Yellow Green': [154, 205, 50],
+      'Chartreuse': [127, 255, 0],
+      'Lawn Green': [124, 252, 0],
+      'Jade': [0, 168, 107],
+      'Emerald': [80, 200, 120],
+      'Kelly Green': [76, 187, 23],
+      'Grass Green': [124, 252, 0],
+      'Shamrock': [0, 158, 96],
+      'Neon Green': [57, 255, 20],
+      'Pistachio': [147, 197, 114],
+      'Sage': [188, 184, 138],
+      'Moss Green': [138, 154, 91],
+      'Fern Green': [79, 121, 66],
+      'Hunter Green': [53, 94, 59],
+
+      // ==================== BLUES ====================
+      'Blue': [0, 0, 255],
+      'Dark Blue': [0, 0, 139],
+      'Navy': [0, 0, 128],
+      'Navy Blue': [0, 0, 128],
+      'Medium Blue': [0, 0, 205],
+      'Royal Blue': [65, 105, 225],
+      'Steel Blue': [70, 130, 180],
+      'Light Steel Blue': [176, 196, 222],
+      'Dodger Blue': [30, 144, 255],
+      'Deep Sky Blue': [0, 191, 255],
+      'Sky Blue': [135, 206, 235],
+      'Light Sky Blue': [135, 206, 250],
+      'Light Blue': [173, 216, 230],
+      'Powder Blue': [176, 224, 230],
+      'Cornflower Blue': [100, 149, 237],
+      'Azure': [240, 255, 255],
+      'Baby Blue': [137, 207, 240],
+      'Periwinkle': [204, 204, 255],
+      'Electric Blue': [125, 249, 255],
+      'Cobalt Blue': [0, 71, 171],
+      'Sapphire': [15, 82, 186],
+      'Cerulean': [0, 123, 167],
+      'Ice Blue': [175, 238, 238],
+      'Carolina Blue': [86, 160, 211],
+      'Denim': [21, 96, 189],
+      'Midnight Blue': [25, 25, 112],
+      'Prussian Blue': [0, 49, 83],
+      'Oxford Blue': [0, 33, 71],
+
+      // ==================== CYANS & TEALS ====================
+      'Cyan': [0, 255, 255],
+      'Aqua': [0, 255, 255],
+      'Turquoise': [64, 224, 208],
+      'Medium Turquoise': [72, 209, 204],
+      'Dark Turquoise': [0, 206, 209],
+      'Light Cyan': [224, 255, 255],
+      'Teal': [0, 128, 128],
+      'Dark Teal': [0, 77, 77],
+      'Aquamarine': [127, 255, 212],
+      'Medium Aquamarine': [102, 205, 170],
+      'Cadet Blue': [95, 158, 160],
+      'Caribbean Blue': [0, 204, 204],
+      'Robin Egg Blue': [0, 204, 204],
+      'Tropical Blue': [0, 191, 255],
+
+      // ==================== PURPLES ====================
+      'Purple': [128, 0, 128],
+      'Dark Purple': [48, 25, 52],
+      'Indigo': [75, 0, 130],
+      'Dark Violet': [148, 0, 211],
+      'Blue Violet': [138, 43, 226],
+      'Medium Purple': [147, 112, 219],
+      'Lavender': [230, 230, 250],
+      'Plum': [221, 160, 221],
+      'Orchid': [218, 112, 214],
+      'Medium Orchid': [186, 85, 211],
+      'Violet': [238, 130, 238],
+      'Amethyst': [153, 102, 204],
+      'Lilac': [200, 162, 200],
+      'Mauve': [224, 176, 255],
+      'Grape': [111, 45, 168],
+      'Royal Purple': [120, 81, 169],
+      'Deep Purple': [51, 0, 102],
+      'Eggplant': [97, 64, 81],
+      'Iris': [93, 63, 211],
+      'Heliotrope': [223, 115, 255],
+      'Periwinkle': [204, 204, 255],
+
+      // ==================== PINKS & MAGENTAS ====================
+      'Pink': [255, 192, 203],
+      'Light Pink': [255, 182, 193],
+      'Hot Pink': [255, 105, 180],
+      'Deep Pink': [255, 20, 147],
+      'Magenta': [255, 0, 255],
+      'Fuchsia': [255, 0, 255],
+      'Dark Magenta': [139, 0, 139],
+      'Pale Violet Red': [219, 112, 147],
+      'Medium Violet Red': [199, 21, 133],
+      'Rose': [255, 0, 127],
+      'Carnation Pink': [255, 166, 201],
+      'Bubblegum': [255, 193, 204],
+      'Flamingo': [252, 142, 172],
+      'Coral Pink': [248, 131, 121],
+      'Salmon Pink': [255, 145, 164],
+      'Peach Pink': [255, 218, 185],
+      'Blush': [222, 93, 131],
+      'Watermelon': [254, 127, 156],
+      'Cotton Candy': [255, 188, 217],
+      'Neon Pink': [255, 16, 240],
+
+      // ==================== BROWNS ====================
+      'Brown': [165, 42, 42],
+      'Dark Brown': [101, 67, 33],
+      'Saddle Brown': [139, 69, 19],
+      'Sienna': [160, 82, 45],
+      'Chocolate': [210, 105, 30],
+      'Peru': [205, 133, 63],
+      'Sandy Brown': [244, 164, 96],
+      'Tan': [210, 180, 140],
+      'Beige': [245, 245, 220],
+      'Wheat': [245, 222, 179],
+      'Burly Wood': [222, 184, 135],
+      'Khaki': [240, 230, 140],
+      'Coffee': [111, 78, 55],
+      'Mocha': [139, 69, 19],
+      'Caramel': [255, 213, 154],
+      'Chestnut': [149, 69, 53],
+      'Mahogany': [192, 64, 0],
+      'Walnut': [119, 63, 26],
+      'Sepia': [112, 66, 20],
+      'Taupe': [72, 60, 50],
+      'Umber': [99, 81, 71],
+      'Ochre': [204, 119, 34],
+      'Toffee': [116, 78, 46],
+      'Hazel': [142, 118, 83],
+      'Cinnamon': [210, 105, 30],
+      'Bronze': [205, 127, 50],
+      'Copper': [184, 115, 51],
+
+      // ==================== GRAYS & NEUTRALS ====================
+      'White': [255, 255, 255],
+      'Snow': [255, 250, 250],
+      'Ivory': [255, 255, 240],
+      'Floral White': [255, 250, 240],
+      'Antique White': [250, 235, 215],
+      'Linen': [250, 240, 230],
+      'Old Lace': [253, 245, 230],
+      'Seashell': [255, 245, 238],
+      'Ghost White': [248, 248, 255],
+      'Alice Blue': [240, 248, 255],
+      'Honeydew': [240, 255, 240],
+      'Off White': [250, 250, 250],
+      'Cream': [255, 253, 208],
+      'Light Gray': [211, 211, 211],
+      'Silver': [192, 192, 192],
+      'Gray': [128, 128, 128],
+      'Medium Gray': [140, 140, 140],
+      'Dark Gray': [169, 169, 169],
+      'Dim Gray': [105, 105, 105],
+      'Slate Gray': [112, 128, 144],
+      'Dark Slate Gray': [47, 79, 79],
+      'Light Slate Gray': [119, 136, 153],
+      'Charcoal': [54, 69, 79],
+      'Ash Gray': [178, 190, 181],
+      'Smoke': [115, 130, 118],
+      'Graphite': [56, 63, 69],
+      'Pewter': [150, 168, 166],
+      'Steel Gray': [67, 70, 75],
+      'Black': [0, 0, 0],
+      'Jet Black': [13, 13, 13],
+      'Ebony': [85, 93, 80],
+
+      // ==================== SPECIAL & UNIQUE COLORS ====================
+      'Crimson': [220, 20, 60],
+      'Scarlet': [255, 36, 0],
+      'Vermillion': [227, 66, 52],
+      'Puce': [204, 136, 153],
+      'Mulberry': [197, 75, 140],
+      'Cerise': [222, 49, 99],
+      'Chartreuse': [127, 255, 0],
+      'Lime': [191, 255, 0],
+      'Spring Bud': [167, 252, 0],
+      'Harlequin': [63, 255, 0],
+      'Electric Lime': [204, 255, 0],
+      'Lawn Green': [124, 252, 0],
+      'Bright Green': [102, 255, 0],
+      'Screamin Green': [102, 255, 102],
+      'Mantis': [116, 195, 101],
+      'Jungle Green': [41, 171, 135],
+      'Caribbean Green': [0, 204, 153],
+      'Persian Green': [0, 166, 147],
+      'Viridian': [64, 130, 109],
+      'Peacock': [0, 103, 165],
+      'Cerulean Blue': [42, 82, 190],
+      'Electric Blue': [125, 249, 255],
+      'Tiffany Blue': [129, 216, 208],
+      'Arctic Blue': [219, 229, 241],
+      'Han Blue': [68, 108, 207],
+      'Persian Blue': [28, 57, 187],
+      'Egyptian Blue': [16, 52, 166],
+      'Ultramarine': [18, 10, 143],
+      'Majorelle Blue': [96, 80, 220],
+      'Palatinate Purple': [104, 40, 96],
+      'Byzantine': [189, 51, 164],
+      'Tyrian Purple': [102, 2, 60],
+      'French Lilac': [134, 96, 142],
+      'Opera Mauve': [183, 132, 167],
+      'Shocking Pink': [252, 15, 192],
+      'Persian Rose': [254, 40, 162],
+      'Neon Purple': [188, 19, 254],
+      'Psychedelic Purple': [223, 0, 255],
+      'Fluorescent Pink': [255, 20, 147],
+      'Electric Pink': [255, 0, 255],
+      'Razzle Dazzle Rose': [255, 51, 204],
+      'Hot Magenta': [255, 29, 206],
+      'Brilliant Rose': [255, 85, 163],
+      'Brink Pink': [251, 96, 127],
+      'French Rose': [246, 74, 138],
+      'Wild Strawberry': [255, 67, 164],
+    };
+
+    // Find the closest color using Euclidean distance
+    String closestColorName = 'Unknown';
+    double minDistance = double.infinity;
+
+    colorDatabase.forEach((name, rgb) {
+      // Calculate Euclidean distance in 3D RGB space
+      double distance = sqrt(
+          pow(r - rgb[0], 2) +
+              pow(g - rgb[1], 2) +
+              pow(b - rgb[2], 2)
+      );
+
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestColorName = name;
+      }
+    });
+
+    return closestColorName;
+  }
+  Future<void> _detectColor(Offset position) async {
+    if (controller == null || !controller!.value.isInitialized) return;
+
+    try {
+      final picture = await controller!.takePicture();
+      final bytes = await File(picture.path).readAsBytes();
+      final image = img.decodeImage(bytes);
+      if (image == null) {
+        print("Failed to decode image");
+        return;
+      }
+
+      // Get screen dimensions
+      final screenWidth = MediaQuery.of(context).size.width;
+      final screenHeight = MediaQuery.of(context).size.height;
+
+      print("Screen size: $screenWidth x $screenHeight");
+      print("Camera image size: ${image.width} x ${image.height}");
+      print("Tap position: ${position.dx}, ${position.dy}");
+
+      // Camera preview might be rotated, but the captured image is in native orientation
+      // For most phones, camera captures in landscape even if preview is portrait
+
+      // Get the camera's aspect ratio
+      final previewSize = controller!.value.previewSize!;
+      final cameraAspect = previewSize.width / previewSize.height;
+
+      // Adjust for screen orientation
+      double effectiveWidth, effectiveHeight;
+      if (cameraAspect > 1) {
+        // Camera is landscape
+        effectiveWidth = previewSize.height;
+        effectiveHeight = previewSize.width;
+      } else {
+        effectiveWidth = previewSize.width;
+        effectiveHeight = previewSize.height;
+      }
+
+      final screenAspect = screenWidth / screenHeight;
+      final imageAspect = effectiveWidth / effectiveHeight;
+
+      double scale;
+      double offsetX = 0;
+      double offsetY = 0;
+
+      if (screenAspect > imageAspect) {
+        // Screen is wider
+        scale = screenHeight / effectiveHeight;
+        final scaledWidth = effectiveWidth * scale;
+        offsetX = (screenWidth - scaledWidth) / 2;
+      } else {
+        // Screen is taller
+        scale = screenWidth / effectiveWidth;
+        final scaledHeight = effectiveHeight * scale;
+        offsetY = (screenHeight - scaledHeight) / 2;
+      }
+
+      print("Scale: $scale, Offset: $offsetX, $offsetY");
+
+      // Map tap to preview coordinates
+      final previewX = ((position.dx - offsetX) / scale).clamp(0, effectiveWidth - 1);
+      final previewY = ((position.dy - offsetY) / scale).clamp(0, effectiveHeight - 1);
+
+      // Map to actual image coordinates (may need rotation)
+      int imageX, imageY;
+      if (cameraAspect > 1) {
+        // Rotate coordinates
+        imageX = previewY.round().clamp(0, image.width - 1);
+        imageY = (effectiveWidth - previewX).round().clamp(0, image.height - 1);
+      } else {
+        imageX = previewX.round().clamp(0, image.width - 1);
+        imageY = previewY.round().clamp(0, image.height - 1);
+      }
+
+      print("Final image coordinates: $imageX, $imageY");
+
+      // Get pixel color
+      final pixel = image.getPixel(imageX, imageY);
+      final r = pixel.r.toInt();
+      final g = pixel.g.toInt();
+      final b = pixel.b.toInt();
+
+      print("RGB: $r, $g, $b");
+
+      setState(() {
+        detectedColor = Color.fromARGB(255, r, g, b);
+        detectedColorName = _getShadeName(r, g, b);
+        detectedHex =
+        '#${r.toRadixString(16).padLeft(2,'0').toUpperCase()}${g.toRadixString(16).padLeft(2,'0').toUpperCase()}${b.toRadixString(16).padLeft(2,'0').toUpperCase()}';
+        detectedRgb = 'RGB($r, $g, $b)';
+        lastTapPosition = position;
+      });
+
+      await File(picture.path).delete();
+    } catch (e) {
+      print("Error detecting camera color: $e");
+    }
+  }
+
+  @override
+  void dispose() {
+    controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  @override
+  Widget build(BuildContext context) {
+    if (!isReady) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: CircularProgressIndicator(color: Color(0xFF3B82F6)),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          // Camera Preview with Tap Detection
+          Positioned.fill(
+            child: GestureDetector(
+              onTapDown: (details) {
+                _detectColor(details.localPosition);
+              },
+              child: CameraPreview(controller!),
+            ),
+          ),
+
+          // Back Button
+          Positioned(
+            top: 50,
+            left: 20,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.5),
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.white, size: 28),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+          ),
+
+          // Detected Color Display (Above Capture Button)
+          Positioned(
+            bottom: 160,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                decoration: BoxDecoration(
+                  color: detectedColor ?? Colors.grey.withOpacity(0.8),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white, width: 3),
+                  boxShadow: [
+                    BoxShadow(
+                      color: (detectedColor ?? Colors.grey).withOpacity(0.6),
+                      blurRadius: 20,
+                      spreadRadius: 5,
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      detectedColorName,
+                      style: TextStyle(
+                        color: (detectedColor?.computeLuminance() ?? 0.5) > 0.5
+                            ? Colors.black
+                            : Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (detectedHex.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        detectedHex,
+                        style: TextStyle(
+                          color: (detectedColor?.computeLuminance() ?? 0.5) > 0.5
+                              ? Colors.black54
+                              : Colors.white70,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // Capture Button
+          Positioned(
+            bottom: 50,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: GestureDetector(
+                onTap: _capture, // Takes picture and passes last detected color info
+                child: Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 5),
+                  ),
+                  child: Center(
+                    child: Container(
+                      width: 60,
+                      height: 60,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+}
+
+/// ---------------------------
+/// UPLOAD RESULT SCREEN
+/// ---------------------------
+class UploadResultScreen extends StatefulWidget {
+  final File imageFile;
+  const UploadResultScreen({required this.imageFile, super.key});
+
+  @override
+  State<UploadResultScreen> createState() => _UploadResultScreenState();
+}
+
+class _UploadResultScreenState extends State<UploadResultScreen> {
+  Color? detectedColor;
+  String detectedColorName = "Tap to detect color";
+  String detectedHex = "";
+  String detectedRgb = "";
+  Offset? lastTapPosition;
+
+  Color dominantColor = Colors.white;
+  String hex = "", rgb = "", shade = "";
+  bool isLoading = true;
+
+  @override
+
+  void initState() {
+    super.initState();
+    // Don't call _detectColor on init since it needs a tap position
+    setState(() {
+      isLoading = false;
+    });
+  }
+
+  GlobalKey _imageKey = GlobalKey(); // Add this at the top of the class
+
+  void _detectColor(Offset tapPosition) async {
+    try {
+      final bytes = await widget.imageFile.readAsBytes();
+      final image = img.decodeImage(bytes);
+      if (image == null) return;
+
+      // Get the actual rendered size of the image widget
+      final RenderBox? renderBox = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+      if (renderBox == null) {
+        print("RenderBox is null");
+        return;
+      }
+
+      // Get the actual displayed size
+      final widgetWidth = renderBox.size.width;
+      final widgetHeight = renderBox.size.height;
+
+      print("Widget size: $widgetWidth x $widgetHeight");
+      print("Image size: ${image.width} x ${image.height}");
+      print("Tap position: ${tapPosition.dx}, ${tapPosition.dy}");
+
+      // Image dimensions
+      final imageWidth = image.width;
+      final imageHeight = image.height;
+
+      // Calculate aspect ratios
+      final imageAspect = imageWidth / imageHeight;
+      final widgetAspect = widgetWidth / widgetHeight;
+
+      double scale;
+      double offsetX = 0;
+      double offsetY = 0;
+
+      if (widgetAspect > imageAspect) {
+        // Widget is wider - image height fills, width is centered
+        scale = widgetHeight / imageHeight;
+        final scaledWidth = imageWidth * scale;
+        offsetX = (widgetWidth - scaledWidth) / 2;
+      } else {
+        // Widget is taller - image width fills, height is centered
+        scale = widgetWidth / imageWidth;
+        final scaledHeight = imageHeight * scale;
+        offsetY = (widgetHeight - scaledHeight) / 2;
+      }
+
+      print("Scale: $scale, Offset: $offsetX, $offsetY");
+
+      // Map tap coordinates to image coordinates
+      final imageX = ((tapPosition.dx - offsetX) / scale).round().clamp(0, imageWidth - 1);
+      final imageY = ((tapPosition.dy - offsetY) / scale).round().clamp(0, imageHeight - 1);
+
+      print("Image coordinates: $imageX, $imageY");
+
+      // Get pixel color
+      final pixel = image.getPixel(imageX, imageY);
+      final r = pixel.r.toInt();
+      final g = pixel.g.toInt();
+      final b = pixel.b.toInt();
+
+      print("RGB: $r, $g, $b");
+
+      setState(() {
+        detectedColor = Color.fromARGB(255, r, g, b);
+        detectedColorName = _getShadeName(r, g, b);
+        detectedHex =
+        '#${r.toRadixString(16).padLeft(2,'0').toUpperCase()}${g.toRadixString(16).padLeft(2,'0').toUpperCase()}${b.toRadixString(16).padLeft(2,'0').toUpperCase()}';
+        detectedRgb = 'RGB($r, $g, $b)';
+        lastTapPosition = tapPosition;
+      });
+    } catch(e) {
+      print("Error detecting color on upload: $e");
+    }
+  }
+  String _getShadeName(int r, int g, int b) {
+    // Comprehensive color database with 250+ colors
+    final Map<String, List<int>> colorDatabase = {
+      // ==================== REDS ====================
+      'Red': [255, 0, 0],
+      'Dark Red': [139, 0, 0],
+      'Crimson': [220, 20, 60],
+      'Maroon': [128, 0, 0],
+      'Firebrick': [178, 34, 34],
+      'Indian Red': [205, 92, 92],
+      'Light Coral': [240, 128, 128],
+      'Salmon': [250, 128, 114],
+      'Dark Salmon': [233, 150, 122],
+      'Light Salmon': [255, 160, 122],
+      'Tomato': [255, 99, 71],
+      'Cherry Red': [222, 49, 99],
+      'Ruby Red': [155, 17, 30],
+      'Raspberry': [227, 11, 92],
+      'Wine Red': [114, 47, 55],
+      'Burgundy': [128, 0, 32],
+      'Blood Red': [102, 0, 0],
+      'Candy Apple Red': [255, 8, 0],
+      'Ferrari Red': [255, 40, 0],
+      'Rose Red': [194, 30, 86],
+
+      // ==================== ORANGES ====================
+      'Orange': [255, 165, 0],
+      'Dark Orange': [255, 140, 0],
+      'Orange Red': [255, 69, 0],
+      'Tomato Orange': [255, 99, 71],
+      'Coral': [255, 127, 80],
+      'Light Coral': [240, 128, 128],
+      'Peach': [255, 218, 185],
+      'Peach Puff': [255, 218, 185],
+      'Apricot': [251, 206, 177],
+      'Mango': [255, 130, 67],
+      'Tangerine': [242, 133, 0],
+      'Burnt Orange': [204, 85, 0],
+      'Rust': [183, 65, 14],
+      'Carrot': [237, 145, 33],
+      'Pumpkin': [255, 117, 24],
+      'Marigold': [234, 162, 33],
+      'Amber': [255, 191, 0],
+      'Safety Orange': [255, 120, 0],
+      'Persimmon': [236, 88, 0],
+      'Honey': [235, 160, 35],
+
+      // ==================== YELLOWS ====================
+      'Yellow': [255, 255, 0],
+      'Light Yellow': [255, 255, 224],
+      'Lemon': [255, 247, 0],
+      'Lemon Chiffon': [255, 250, 205],
+      'Gold': [255, 215, 0],
+      'Golden': [255, 223, 0],
+      'Khaki': [240, 230, 140],
+      'Dark Khaki': [189, 183, 107],
+      'Cream': [255, 253, 208],
+      'Ivory': [255, 255, 240],
+      'Canary Yellow': [255, 255, 153],
+      'Banana': [255, 225, 53],
+      'Mustard': [255, 219, 88],
+      'Goldenrod': [218, 165, 32],
+      'Dark Goldenrod': [184, 134, 11],
+      'Corn': [251, 236, 93],
+      'Butter': [255, 255, 181],
+      'Saffron': [244, 196, 48],
+      'Daffodil': [255, 255, 49],
+      'Dandelion': [255, 218, 71],
+
+      // ==================== GREENS ====================
+      'Green': [0, 128, 0],
+      'Dark Green': [0, 100, 0],
+      'Forest Green': [34, 139, 34],
+      'Lime': [0, 255, 0],
+      'Lime Green': [50, 205, 50],
+      'Light Green': [144, 238, 144],
+      'Pale Green': [152, 251, 152],
+      'Spring Green': [0, 255, 127],
+      'Medium Spring Green': [0, 250, 154],
+      'Sea Green': [46, 139, 87],
+      'Medium Sea Green': [60, 179, 113],
+      'Mint': [189, 252, 201],
+      'Mint Green': [152, 255, 152],
+      'Mint Cream': [245, 255, 250],
+      'Olive': [128, 128, 0],
+      'Olive Drab': [107, 142, 35],
+      'Yellow Green': [154, 205, 50],
+      'Chartreuse': [127, 255, 0],
+      'Lawn Green': [124, 252, 0],
+      'Jade': [0, 168, 107],
+      'Emerald': [80, 200, 120],
+      'Kelly Green': [76, 187, 23],
+      'Grass Green': [124, 252, 0],
+      'Shamrock': [0, 158, 96],
+      'Neon Green': [57, 255, 20],
+      'Pistachio': [147, 197, 114],
+      'Sage': [188, 184, 138],
+      'Moss Green': [138, 154, 91],
+      'Fern Green': [79, 121, 66],
+      'Hunter Green': [53, 94, 59],
+
+      // ==================== BLUES ====================
+      'Blue': [0, 0, 255],
+      'Dark Blue': [0, 0, 139],
+      'Navy': [0, 0, 128],
+      'Navy Blue': [0, 0, 128],
+      'Medium Blue': [0, 0, 205],
+      'Royal Blue': [65, 105, 225],
+      'Steel Blue': [70, 130, 180],
+      'Light Steel Blue': [176, 196, 222],
+      'Dodger Blue': [30, 144, 255],
+      'Deep Sky Blue': [0, 191, 255],
+      'Sky Blue': [135, 206, 235],
+      'Light Sky Blue': [135, 206, 250],
+      'Light Blue': [173, 216, 230],
+      'Powder Blue': [176, 224, 230],
+      'Cornflower Blue': [100, 149, 237],
+      'Azure': [240, 255, 255],
+      'Baby Blue': [137, 207, 240],
+      'Periwinkle': [204, 204, 255],
+      'Electric Blue': [125, 249, 255],
+      'Cobalt Blue': [0, 71, 171],
+      'Sapphire': [15, 82, 186],
+      'Cerulean': [0, 123, 167],
+      'Ice Blue': [175, 238, 238],
+      'Carolina Blue': [86, 160, 211],
+      'Denim': [21, 96, 189],
+      'Midnight Blue': [25, 25, 112],
+      'Prussian Blue': [0, 49, 83],
+      'Oxford Blue': [0, 33, 71],
+
+      // ==================== CYANS & TEALS ====================
+      'Cyan': [0, 255, 255],
+      'Aqua': [0, 255, 255],
+      'Turquoise': [64, 224, 208],
+      'Medium Turquoise': [72, 209, 204],
+      'Dark Turquoise': [0, 206, 209],
+      'Light Cyan': [224, 255, 255],
+      'Teal': [0, 128, 128],
+      'Dark Teal': [0, 77, 77],
+      'Aquamarine': [127, 255, 212],
+      'Medium Aquamarine': [102, 205, 170],
+      'Cadet Blue': [95, 158, 160],
+      'Caribbean Blue': [0, 204, 204],
+      'Robin Egg Blue': [0, 204, 204],
+      'Tropical Blue': [0, 191, 255],
+
+      // ==================== PURPLES ====================
+      'Purple': [128, 0, 128],
+      'Dark Purple': [48, 25, 52],
+      'Indigo': [75, 0, 130],
+      'Dark Violet': [148, 0, 211],
+      'Blue Violet': [138, 43, 226],
+      'Medium Purple': [147, 112, 219],
+      'Lavender': [230, 230, 250],
+      'Plum': [221, 160, 221],
+      'Orchid': [218, 112, 214],
+      'Medium Orchid': [186, 85, 211],
+      'Violet': [238, 130, 238],
+      'Amethyst': [153, 102, 204],
+      'Lilac': [200, 162, 200],
+      'Mauve': [224, 176, 255],
+      'Grape': [111, 45, 168],
+      'Royal Purple': [120, 81, 169],
+      'Deep Purple': [51, 0, 102],
+      'Eggplant': [97, 64, 81],
+      'Iris': [93, 63, 211],
+      'Heliotrope': [223, 115, 255],
+      'Periwinkle': [204, 204, 255],
+
+      // ==================== PINKS & MAGENTAS ====================
+      'Pink': [255, 192, 203],
+      'Light Pink': [255, 182, 193],
+      'Hot Pink': [255, 105, 180],
+      'Deep Pink': [255, 20, 147],
+      'Magenta': [255, 0, 255],
+      'Fuchsia': [255, 0, 255],
+      'Dark Magenta': [139, 0, 139],
+      'Pale Violet Red': [219, 112, 147],
+      'Medium Violet Red': [199, 21, 133],
+      'Rose': [255, 0, 127],
+      'Carnation Pink': [255, 166, 201],
+      'Bubblegum': [255, 193, 204],
+      'Flamingo': [252, 142, 172],
+      'Coral Pink': [248, 131, 121],
+      'Salmon Pink': [255, 145, 164],
+      'Peach Pink': [255, 218, 185],
+      'Blush': [222, 93, 131],
+      'Watermelon': [254, 127, 156],
+      'Cotton Candy': [255, 188, 217],
+      'Neon Pink': [255, 16, 240],
+
+      // ==================== BROWNS ====================
+      'Brown': [165, 42, 42],
+      'Dark Brown': [101, 67, 33],
+      'Saddle Brown': [139, 69, 19],
+      'Sienna': [160, 82, 45],
+      'Chocolate': [210, 105, 30],
+      'Peru': [205, 133, 63],
+      'Sandy Brown': [244, 164, 96],
+      'Tan': [210, 180, 140],
+      'Beige': [245, 245, 220],
+      'Wheat': [245, 222, 179],
+      'Burly Wood': [222, 184, 135],
+      'Khaki': [240, 230, 140],
+      'Coffee': [111, 78, 55],
+      'Mocha': [139, 69, 19],
+      'Caramel': [255, 213, 154],
+      'Chestnut': [149, 69, 53],
+      'Mahogany': [192, 64, 0],
+      'Walnut': [119, 63, 26],
+      'Sepia': [112, 66, 20],
+      'Taupe': [72, 60, 50],
+      'Umber': [99, 81, 71],
+      'Ochre': [204, 119, 34],
+      'Toffee': [116, 78, 46],
+      'Hazel': [142, 118, 83],
+      'Cinnamon': [210, 105, 30],
+      'Bronze': [205, 127, 50],
+      'Copper': [184, 115, 51],
+
+      // ==================== GRAYS & NEUTRALS ====================
+      'White': [255, 255, 255],
+      'Snow': [255, 250, 250],
+      'Ivory': [255, 255, 240],
+      'Floral White': [255, 250, 240],
+      'Antique White': [250, 235, 215],
+      'Linen': [250, 240, 230],
+      'Old Lace': [253, 245, 230],
+      'Seashell': [255, 245, 238],
+      'Ghost White': [248, 248, 255],
+      'Alice Blue': [240, 248, 255],
+      'Honeydew': [240, 255, 240],
+      'Off White': [250, 250, 250],
+      'Cream': [255, 253, 208],
+      'Light Gray': [211, 211, 211],
+      'Silver': [192, 192, 192],
+      'Gray': [128, 128, 128],
+      'Medium Gray': [140, 140, 140],
+      'Dark Gray': [169, 169, 169],
+      'Dim Gray': [105, 105, 105],
+      'Slate Gray': [112, 128, 144],
+      'Dark Slate Gray': [47, 79, 79],
+      'Light Slate Gray': [119, 136, 153],
+      'Charcoal': [54, 69, 79],
+      'Ash Gray': [178, 190, 181],
+      'Smoke': [115, 130, 118],
+      'Graphite': [56, 63, 69],
+      'Pewter': [150, 168, 166],
+      'Steel Gray': [67, 70, 75],
+      'Black': [0, 0, 0],
+      'Jet Black': [13, 13, 13],
+      'Ebony': [85, 93, 80],
+
+      // ==================== SPECIAL & UNIQUE COLORS ====================
+      'Crimson': [220, 20, 60],
+      'Scarlet': [255, 36, 0],
+      'Vermillion': [227, 66, 52],
+      'Puce': [204, 136, 153],
+      'Mulberry': [197, 75, 140],
+      'Cerise': [222, 49, 99],
+      'Chartreuse': [127, 255, 0],
+      'Lime': [191, 255, 0],
+      'Spring Bud': [167, 252, 0],
+      'Harlequin': [63, 255, 0],
+      'Electric Lime': [204, 255, 0],
+      'Lawn Green': [124, 252, 0],
+      'Bright Green': [102, 255, 0],
+      'Screamin Green': [102, 255, 102],
+      'Mantis': [116, 195, 101],
+      'Jungle Green': [41, 171, 135],
+      'Caribbean Green': [0, 204, 153],
+      'Persian Green': [0, 166, 147],
+      'Viridian': [64, 130, 109],
+      'Peacock': [0, 103, 165],
+      'Cerulean Blue': [42, 82, 190],
+      'Electric Blue': [125, 249, 255],
+      'Tiffany Blue': [129, 216, 208],
+      'Arctic Blue': [219, 229, 241],
+      'Han Blue': [68, 108, 207],
+      'Persian Blue': [28, 57, 187],
+      'Egyptian Blue': [16, 52, 166],
+      'Ultramarine': [18, 10, 143],
+      'Majorelle Blue': [96, 80, 220],
+      'Palatinate Purple': [104, 40, 96],
+      'Byzantine': [189, 51, 164],
+      'Tyrian Purple': [102, 2, 60],
+      'French Lilac': [134, 96, 142],
+      'Opera Mauve': [183, 132, 167],
+      'Shocking Pink': [252, 15, 192],
+      'Persian Rose': [254, 40, 162],
+      'Neon Purple': [188, 19, 254],
+      'Psychedelic Purple': [223, 0, 255],
+      'Fluorescent Pink': [255, 20, 147],
+      'Electric Pink': [255, 0, 255],
+      'Razzle Dazzle Rose': [255, 51, 204],
+      'Hot Magenta': [255, 29, 206],
+      'Brilliant Rose': [255, 85, 163],
+      'Brink Pink': [251, 96, 127],
+      'French Rose': [246, 74, 138],
+      'Wild Strawberry': [255, 67, 164],
+    };
+
+    // Find the closest color using Euclidean distance
+    String closestColorName = 'Unknown';
+    double minDistance = double.infinity;
+
+    colorDatabase.forEach((name, rgb) {
+      // Calculate Euclidean distance in 3D RGB space
+      double distance = sqrt(
+          pow(r - rgb[0], 2) +
+              pow(g - rgb[1], 2) +
+              pow(b - rgb[2], 2)
+      );
+
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestColorName = name;
+      }
+    });
+
+    return closestColorName;
+  }
+
+  void _copyToClipboard(String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Copied to clipboard!'), duration: Duration(seconds: 1)),
+    );
+  }
+
+  @override
+
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF1A1A2E),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.share, color: Colors.white),
+            onPressed: () {},
+          ),
+        ],
+      ),
+      body: isLoading
+          ? const Center(
+          child: CircularProgressIndicator(color: Color(0xFF3B82F6)))
+          : SafeArea(
+        child: SingleChildScrollView(
+          child: Column(
+            children: [
+              const SizedBox(height: 40),
+
+              // Image with tap detection - CORRECTED
+              Center(
+                child: GestureDetector(
+                  onTapDown: (details) {
+                    // Get the position relative to the GestureDetector
+                    _detectColor(details.localPosition);
+                  },
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 16),
+                    width: double.infinity,
+                    height: 300,
+                    color: Colors.black, // background for empty space
+                    child: Image.file(
+                      widget.imageFile,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 40),
+
+              // Large Color Display
+              Container(
+                key: _imageKey,
+                margin: const EdgeInsets.symmetric(horizontal: 32),
+                width: double.infinity,
+                height: 200,
+                decoration: BoxDecoration(
+                  color: detectedColor ?? Colors.grey,
+                  borderRadius: BorderRadius.circular(24),
+                  boxShadow: [
+                    BoxShadow(
+                      color: (detectedColor ?? Colors.grey).withOpacity(0.5),
+                      blurRadius: 30,
+                      spreadRadius: 5,
+                    ),
+                  ],
+                ),
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        detectedColorName,
+                        style: TextStyle(
+                          color: (detectedColor?.computeLuminance() ?? 0.5) > 0.5
+                              ? Colors.black
+                              : Colors.white,
+                          fontSize: 36,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        detectedHex,
+                        style: TextStyle(
+                          color: (detectedColor?.computeLuminance() ?? 0.5) > 0.5
+                              ? Colors.black54
+                              : Colors.white70,
+                          fontSize: 20,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              const SizedBox(height: 60),
+
+              // Color Details Section
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 32),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Color Details',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Detail Cards
+              if (detectedHex.isNotEmpty)
+                _buildDetailCard('HEX Code', detectedHex),
+              if (detectedRgb.isNotEmpty)
+                _buildDetailCard('RGB Values', detectedRgb),
+              if (detectedColorName.isNotEmpty)
+                _buildDetailCard('Closest Shade', detectedColorName),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailCard(String label, String value) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 32, vertical: 8),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF16213E),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: const TextStyle(color: Colors.white54, fontSize: 14)),
+              const SizedBox(height: 4),
+              Text(value, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          IconButton(
+            icon: const Icon(Icons.copy, color: Colors.white54),
+            onPressed: () => _copyToClipboard(value),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// ---------------------------
+/// COLOR VISION TEST
+/// ---------------------------
+class ColorVisionTest extends StatefulWidget {
+  const ColorVisionTest({super.key});
+
+  @override
+  State<ColorVisionTest> createState() => _ColorVisionTestState();
+}
+
+class _ColorVisionTestState extends State<ColorVisionTest> {
+  int currentQuestion = 0;
+  int correctAnswer = 4;
+  List<int> options = [];
+  Color bgColor = Colors.grey;
+  Color numberColor = Colors.black;
+  String colorBlindnessType = '';
+  int correctCount = 0;
+  List<String> wrongTypes = [];
+  final random = Random();
+
+  @override
+  void initState() {
+    super.initState();
+    _generateQuestion();
+  }
+
+  void _generateQuestion() {
+    correctAnswer = random.nextInt(9) + 1;
+
+    List<Map<String, dynamic>> colorPairs = [
+      {
+        'bg': const Color(0xFFB2D8B2),
+        'num': const Color(0xFFFF3333),
+        'type': 'Control (Normal Vision)',
+      },
+      {
+        'bg': const Color(0xFF8B4513),
+        'num': const Color(0xFF4CAF50),
+        'type': 'Protanopia/Protanomaly',
+      },
+      {
+        'bg': const Color(0xFFBFD200),
+        'num': const Color(0xFFFF7043),
+        'type': 'Deuteranopia/Deuteranomaly',
+      },
+      {
+        'bg': const Color(0xFF1565C0),
+        'num': const Color(0xFFFFEB3B),
+        'type': 'Tritanopia/Tritanomaly',
+      },
+      {
+        'bg': const Color(0xFFA8C3A0),
+        'num': const Color(0xFFD500F9),
+        'type': 'Mild/Partial Color Deficiency',
+      },
+    ];
+
+    var pair = colorPairs[currentQuestion];
+    bgColor = pair['bg'];
+    numberColor = pair['num'];
+    colorBlindnessType = pair['type'];
+
+    options = [correctAnswer];
+    while (options.length < 3) {
+      int n = random.nextInt(9) + 1;
+      if (!options.contains(n)) options.add(n);
+    }
+    options.shuffle();
+  }
+
+  void _checkAnswer(int selected) {
+    bool correct = selected == correctAnswer;
+
+    if (correct) {
+      correctCount++;
+    } else {
+      wrongTypes.add(colorBlindnessType);
+    }
+
+    setState(() {
+      currentQuestion++;
+      if (currentQuestion < 5) {
+        _generateQuestion();
+      } else {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ResultScreen(
+              correctCount: correctCount,
+              totalQuestions: 5,
+              wrongTypes: wrongTypes,
+            ),
+          ),
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    "Color Vision Test",
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text("Skip", style: TextStyle(color: Colors.white70, fontSize: 16)),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              "What number do you see?",
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 25),
+            Center(
+              child: Container(
+                width: 300,
+                height: 300,
+                decoration: BoxDecoration(
+                  color: bgColor,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Center(
+                  child: Text(
+                    correctAnswer.toString(),
+                    style: TextStyle(fontSize: 180, fontWeight: FontWeight.bold, color: numberColor),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 40),
+            Column(
+              children: [
+                for (int opt in options)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 8),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 60,
+                      child: ElevatedButton(
+                        onPressed: () => _checkAnswer(opt),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1C1C1E),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(40)),
+                        ),
+                        child: Text(opt.toString(), style: const TextStyle(fontSize: 22, color: Colors.white)),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 25),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ResultScreen extends StatelessWidget {
+  final int correctCount;
+  final int totalQuestions;
+  final List<String> wrongTypes;
+
+  const ResultScreen({
+    super.key,
+    required this.correctCount,
+    required this.totalQuestions,
+    required this.wrongTypes,
+  });
+
+  @override
+
+  Widget build(BuildContext context) {
+    final isPerfect = correctCount == totalQuestions;
+    final percentage = (correctCount / totalQuestions * 100).toInt();
+
+    String resultMessage;
+    String advice;
+
+    if (isPerfect) {
+      resultMessage = "Perfect Vision!";
+      advice = "Your color vision appears to be normal. Great job!";
+    } else if (percentage >= 60) {
+      resultMessage = "Good Vision";
+      advice = "Your color vision is mostly normal, but consider consulting an eye specialist.";
+    } else {
+      resultMessage = "Needs Attention";
+      advice = "You may have some color vision deficiency. Please consult an eye care professional.";
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  isPerfect ? Icons.check_circle : Icons.info_outline,
+                  color: isPerfect ? Colors.green : Colors.orange,
+                  size: 100,
+                ),
+                const SizedBox(height: 32),
+                Text(
+                  resultMessage,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Score: $correctCount / $totalQuestions',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 24,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1C1C1E),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    advice,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+                if (wrongTypes.isNotEmpty) ...[
+                  const SizedBox(height: 24),
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2C2C2E),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Possible Issues:',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        ...wrongTypes.toSet().map((type) => Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.fiber_manual_record, color: Colors.orange, size: 12),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  type,
+                                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                                ),
+                              ),
+                            ],
+                          ),
+                        )),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 40),
+                SizedBox(
+                  width: double.infinity,
+                  height: 60,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(builder: (_) => const ColorVisionTest()),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF3B82F6),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                    child: const Text(
+                      'Retry Test',
+                      style: TextStyle(fontSize: 18, color: Colors.white),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  height: 60,
+                  child: OutlinedButton(
+                    onPressed: () {
+                      Navigator.pushAndRemoveUntil(
+                        context,
+                        MaterialPageRoute(builder: (_) => const HomeScreen()),
+                            (route) => false,
+                      );
+                    },
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.white54),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                    child: const Text(
+                      'Go Home',
+                      style: TextStyle(fontSize: 18, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// ---------------------------
+/// HISTORY SCREEN (Placeholder)
+/// ---------------------------
+class HistoryScreen extends StatelessWidget {
+  const HistoryScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0F1A2E),
+        title: const Text('History'),
+      ),
+      body: const Center(
+        child: Text(
+          'No history yet',
+          style: TextStyle(color: Colors.white54, fontSize: 16),
+        ),
+      ),
+    );
+  }
+}
+
+/// ---------------------------
+/// SETTINGS SCREEN (Placeholder)
+/// ---------------------------
+class SettingsScreen extends StatelessWidget {
+  const SettingsScreen({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF0F1A2E),
+        title: const Text('Settings'),
+      ),
+      body: const Center(
+        child: Text(
+          'Settings coming soon',
+          style: TextStyle(color: Colors.white54, fontSize: 16),
+        ),
+      ),
+    );
+  }
+}
