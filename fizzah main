@@ -1,0 +1,2250 @@
+import 'dart:io';
+import 'dart:math';
+import 'package:flutter/material.dart';
+import 'package:camera/camera.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:image/image.dart' as img;
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+import 'package:provider/provider.dart';
+import 'settingandhistory.dart';
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(
+    ChangeNotifierProvider(
+      create: (_) => AccessibilitySettings(),
+      child: LumoraAppWithAuth(),
+    ),
+  );
+}
+// ===============================================
+// AUTHENTICATION WRAPPER & AUTH SCREENS
+// ===============================================
+
+class LumoraAppWithAuth extends StatefulWidget {
+  @override
+  State<LumoraAppWithAuth> createState() => _LumoraAppWithAuthState();
+}
+
+class _LumoraAppWithAuthState extends State<LumoraAppWithAuth> {
+  bool isLoading = true;
+  bool isLoggedIn = false;
+
+  @override
+  void initState() {
+    super.initState();
+    checkLogin();
+  }
+
+  void checkLogin() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    isLoggedIn = prefs.getBool("loggedIn") ?? false;
+    setState(() => isLoading = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Lumora',
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: Colors.black,
+      ),
+      home: isLoading
+          ? Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: CircularProgressIndicator(color: Color(0xFF3B82F6)),
+        ),
+      )
+          : isLoggedIn
+          ? const HomeScreen() // Goes to second code's HomeScreen
+          : AuthIntroScreen(), // Shows auth flow first
+    );
+  }
+}
+/// ---------------------------
+/// USER INFO LIST (Long Press Delete)
+/// ---------------------------
+class UserInfoListScreen extends StatefulWidget {
+  @override
+  State<UserInfoListScreen> createState() => _UserInfoListScreenState();
+}
+
+class _UserInfoListScreenState extends State<UserInfoListScreen> {
+  List<Map> users = [];
+  String? currentUserEmail;
+
+  @override
+  void initState() {
+    super.initState();
+    loadUsers();
+  }
+
+  Future<void> loadUsers() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String> saved = prefs.getStringList("users") ?? [];
+    currentUserEmail = prefs.getString("activeEmail");
+    users = saved.map((e) => jsonDecode(e) as Map).toList();
+    setState(() {});
+  }
+
+  Future<void> deleteUser(int index) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String> saved = prefs.getStringList("users") ?? [];
+
+    saved.removeAt(index);
+    prefs.setStringList("users", saved);
+
+    // If deleted user is the current user, log out
+    if (users[index]["email"] == currentUserEmail) {
+      prefs.setBool("loggedIn", false);
+      prefs.remove("activeEmail");
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => AuthIntroScreen()),
+            (route) => false,
+      );
+    } else {
+      loadUsers();
+    }
+  }
+
+  void showDeleteDialog(int index) {
+    bool isCurrentUser = users[index]["email"] == currentUserEmail;
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        backgroundColor: const Color(0xFF0F1A2E),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+            SizedBox(width: 12),
+            Text(
+              "Delete Account?",
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              "Are you sure you want to delete this account?",
+              style: TextStyle(color: Colors.white70, fontSize: 16),
+            ),
+            if (isCurrentUser) ...[
+              SizedBox(height: 12),
+              Container(
+                padding: EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.withOpacity(0.3)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.red, size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "This is your active account. You'll be logged out.",
+                        style: TextStyle(color: Colors.red, fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          // NO BUTTON
+          OutlinedButton(
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: Colors.white54),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+            child: Text("Cancel", style: TextStyle(color: Colors.white, fontSize: 16)),
+            onPressed: () {
+              Navigator.pop(context);
+            },
+          ),
+          // YES BUTTON
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+            child: Text("Delete", style: TextStyle(color: Colors.white, fontSize: 16)),
+            onPressed: () {
+              deleteUser(index);
+              Navigator.pop(context);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+
+  Widget build(BuildContext context) {
+    final accessibilitySettings = Provider.of<AccessibilitySettings>(context);
+    final isHighContrast = accessibilitySettings.highContrast;
+    final colorVisionMode = accessibilitySettings.colorVisionMode;
+
+    return ColorFiltered(
+      colorFilter: ColorFilter.matrix(ColorBlindFilters.getFilter(colorVisionMode)),
+      child: Scaffold(
+        backgroundColor: isHighContrast ? HighContrastTheme.background : Colors.black,
+        appBar: AppBar(
+          backgroundColor: const Color(0xFF0F1A2E),
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: Row(
+            children: [
+              Icon(Icons.people, color: Color(0xFF60A5FA)),
+              SizedBox(width: 12),
+              Text("User Accounts", style: TextStyle(color: Colors.white)),
+            ],
+          ),
+        ),
+        body: users.isEmpty
+            ? Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.people_outline, size: 80, color: Colors.white24),
+              SizedBox(height: 20),
+              Text(
+                "No accounts found",
+                style: TextStyle(color: Colors.white54, fontSize: 18),
+              ),
+              SizedBox(height: 8),
+              Text(
+                "Create an account to get started",
+                style: TextStyle(color: Colors.white38, fontSize: 14),
+              ),
+            ],
+          ),
+        )
+            : ListView.builder(
+          padding: EdgeInsets.all(16),
+          itemCount: users.length,
+          itemBuilder: (context, i) {
+            bool isCurrentUser = users[i]["email"] == currentUserEmail;
+
+            return GestureDetector(
+              onLongPress: () => showDeleteDialog(i),
+              child: Container(
+                margin: EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: isCurrentUser
+                        ? [Color(0xFF1E3A8A), Color(0xFF1E40AF)]
+                        : [Color(0xFF0F1A2E), Color(0xFF1C2A47)],
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isCurrentUser
+                        ? Color(0xFF3B82F6).withOpacity(0.5)
+                        : Colors.white12,
+                    width: 2,
+                  ),
+                ),
+                child: ListTile(
+                  contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                  leading: Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: isCurrentUser
+                            ? [Color(0xFF60A5FA), Color(0xFF3B82F6)]
+                            : [Color(0xFF374151), Color(0xFF1F2937)],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      isCurrentUser ? Icons.person : Icons.person_outline,
+                      color: Colors.white,
+                      size: 28,
+                    ),
+                  ),
+                  title: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          users[i]["name"],
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                      if (isCurrentUser)
+                        Container(
+                          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Color(0xFF3B82F6),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            "Active",
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  subtitle: Padding(
+                    padding: const EdgeInsets.only(top: 4),
+                    child: Text(
+                      users[i]["email"],
+                      style: TextStyle(color: Colors.white70, fontSize: 14),
+                    ),
+                  ),
+                  trailing: Icon(
+                    Icons.more_vert,
+                    color: Colors.white54,
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+        bottomNavigationBar: Container(
+          padding: EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Color(0xFF0F1A2E),
+            border: Border(top: BorderSide(color: Colors.white12)),
+          ),
+          child: SafeArea(
+            child: Text(
+              "💡 Long press any account to delete",
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+// ===============================================
+// AUTH INTRO SCREEN
+// ===============================================
+
+class AuthIntroScreen extends StatelessWidget {
+  @override
+  @override
+  Widget build(BuildContext context) {
+    final accessibilitySettings = Provider.of<AccessibilitySettings>(context);
+    final isHighContrast = accessibilitySettings.highContrast;
+    final colorVisionMode = accessibilitySettings.colorVisionMode;
+
+    return ColorFiltered(
+      colorFilter: ColorFilter.matrix(ColorBlindFilters.getFilter(colorVisionMode)),
+      child: Scaffold(
+        backgroundColor: isHighContrast ? HighContrastTheme.background : Colors.black,
+
+        body: SafeArea(
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Eye Icon
+                Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF60A5FA), Color(0xFF3B82F6)],
+                    ),
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                  child: Icon(Icons.remove_red_eye, size: 60, color: Colors.white),
+                ),
+                SizedBox(height: 50),
+
+                // Lumora Title
+                Text(
+                  "LUMORA",
+                  style: TextStyle(
+                    fontSize: 56,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.white,
+                    letterSpacing: 2,
+                  ),
+                ),
+                SizedBox(height: 10),
+
+                // Subtitle
+                Container(
+                  width: 150,
+                  height: 2,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [Colors.transparent, Color(0xFF3B82F6), Colors.transparent],
+                    ),
+                  ),
+                ),
+                SizedBox(height: 20),
+                Text(
+                  "Discover the colour around you",
+                  style: TextStyle(color: Colors.white70, fontSize: 16),
+                ),
+                SizedBox(height: 80),
+
+                // Get Started Button
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40),
+                  child: SizedBox(
+                    width: double.infinity,
+                    height: 60,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Color(0xFF3B82F6),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => AuthWelcomeScreen()),
+                        );
+                      },
+                      child: Text(
+                        "Get Started",
+                        style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ===============================================
+// AUTH WELCOME SCREEN
+// ===============================================
+
+class AuthWelcomeScreen extends StatelessWidget {
+  @override
+  @override
+  Widget build(BuildContext context) {
+    final accessibilitySettings = Provider.of<AccessibilitySettings>(context);
+    final isHighContrast = accessibilitySettings.highContrast;
+    final colorVisionMode = accessibilitySettings.colorVisionMode;
+
+    return ColorFiltered(
+      colorFilter: ColorFilter.matrix(ColorBlindFilters.getFilter(colorVisionMode)),
+      child: Scaffold(
+        backgroundColor: isHighContrast ? HighContrastTheme.background : Colors.black,
+
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+          ),
+        ),
+        body: SafeArea(
+          child: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(32.0),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 100,
+                    height: 100,
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF60A5FA), Color(0xFF3B82F6)],
+                      ),
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Icon(Icons.remove_red_eye, size: 50, color: Colors.white),
+                  ),
+                  SizedBox(height: 40),
+
+                  Text(
+                    "Welcome to Lumora",
+                    style: TextStyle(
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  SizedBox(height: 16),
+                  Text(
+                    "Sign in to save your colour discoveries\nand personalize your experience",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white70, fontSize: 16),
+                  ),
+                  SizedBox(height: 60),
+
+                  // Log In Button
+                  SizedBox(
+                    width: double.infinity,
+                    height: 60,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Color(0xFF3B82F6),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => AuthLoginScreen()),
+                        );
+                      },
+                      child: Text(
+                        "Log In",
+                        style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: 16),
+
+                  // Sign Up Button
+                  SizedBox(
+                    width: double.infinity,
+                    height: 60,
+                    child: OutlinedButton(
+                      style: OutlinedButton.styleFrom(
+                        side: BorderSide(color: Colors.white54, width: 2),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => AuthSignUpScreen()),
+                        );
+                      },
+                      child: Text(
+                        "Sign Up",
+                        style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ),
+                  SizedBox(height: 32),
+
+                  // Skip Button
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(builder: (_) => const HomeScreen()),
+                      );
+                    },
+                    child: Text(
+                      "Skip for now",
+                      style: TextStyle(color: Colors.white70, fontSize: 16),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ===============================================
+// LOGIN SCREEN
+// ===============================================
+
+class AuthLoginScreen extends StatelessWidget {
+  final email = TextEditingController();
+  final pass = TextEditingController();
+
+  Future<bool> loginUser() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String> saved = prefs.getStringList("users") ?? [];
+
+    for (var u in saved) {
+      Map user = jsonDecode(u);
+      if (user["email"] == email.text.trim() &&
+          user["password"] == pass.text.trim()) {
+        prefs.setBool("loggedIn", true);
+        prefs.setString("activeEmail", user["email"]);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  @override
+  @override
+  Widget build(BuildContext context) {
+    final accessibilitySettings = Provider.of<AccessibilitySettings>(context);
+    final isHighContrast = accessibilitySettings.highContrast;
+    final colorVisionMode = accessibilitySettings.colorVisionMode;
+
+    return ColorFiltered(
+      colorFilter: ColorFilter.matrix(ColorBlindFilters.getFilter(colorVisionMode)),
+      child: Scaffold(
+        backgroundColor: isHighContrast ? HighContrastTheme.background : Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: Text("Log In", style: TextStyle(color: Colors.white)),
+        ),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                authInputField("Email", email),
+                SizedBox(height: 20),
+                authInputField("Password", pass, obscure: true),
+                SizedBox(height: 40),
+
+                SizedBox(
+                  width: double.infinity,
+                  height: 60,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Color(0xFF3B82F6),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: Text(
+                      "Log In",
+                      style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: () async {
+                      bool ok = await loginUser();
+                      if (ok) {
+                        Navigator.pushAndRemoveUntil(
+                          context,
+                          MaterialPageRoute(builder: (_) => const HomeScreen()),
+                              (route) => false,
+                        );
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text("Invalid credentials"),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ===============================================
+// SIGN UP SCREEN
+// ===============================================
+
+class AuthSignUpScreen extends StatelessWidget {
+  final name = TextEditingController();
+  final email = TextEditingController();
+  final pass = TextEditingController();
+
+  Future<void> saveNewUser(String name, String email, String pass) async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    List<String> saved = prefs.getStringList("users") ?? [];
+
+    Map<String, dynamic> newUser = {
+      "name": name,
+      "email": email,
+      "password": pass,
+    };
+
+    saved.add(jsonEncode(newUser));
+    prefs.setStringList("users", saved);
+
+    prefs.setBool("loggedIn", true);
+    prefs.setString("activeEmail", email);
+  }
+
+  @override
+  @override
+  Widget build(BuildContext context) {
+    final accessibilitySettings = Provider.of<AccessibilitySettings>(context);
+    final isHighContrast = accessibilitySettings.highContrast;
+    final colorVisionMode = accessibilitySettings.colorVisionMode;
+
+    return ColorFiltered(
+      colorFilter: ColorFilter.matrix(ColorBlindFilters.getFilter(colorVisionMode)),
+      child: Scaffold(
+        backgroundColor: isHighContrast ? HighContrastTheme.background : Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: Text("Sign Up", style: TextStyle(color: Colors.white)),
+        ),
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                authInputField("Full Name", name),
+                SizedBox(height: 20),
+                authInputField("Email", email),
+                SizedBox(height: 20),
+                authInputField("Password", pass, obscure: true),
+                SizedBox(height: 40),
+
+                SizedBox(
+                  width: double.infinity,
+                  height: 60,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Color(0xFF3B82F6),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: Text(
+                      "Create Account",
+                      style: TextStyle(fontSize: 18, color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: () async {
+                      await saveNewUser(
+                        name.text.trim(),
+                        email.text.trim(),
+                        pass.text.trim(),
+                      );
+
+                      Navigator.pushAndRemoveUntil(
+                        context,
+                        MaterialPageRoute(builder: (_) => const HomeScreen()),
+                            (route) => false,
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ===============================================
+// AUTH INPUT FIELD HELPER
+// ===============================================
+
+Widget authInputField(String label, TextEditingController c, {bool obscure = false}) {
+  return TextField(
+    controller: c,
+    obscureText: obscure,
+    style: TextStyle(color: Colors.white),
+    decoration: InputDecoration(
+      labelText: label,
+      labelStyle: TextStyle(color: Colors.white70),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Colors.white30),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: BorderSide(color: Color(0xFF3B82F6), width: 2),
+      ),
+      filled: true,
+      fillColor: Color(0xFF1C1C1E),
+    ),
+  );
+}
+
+// ===============================================
+// END OF AUTH SCREENS
+// ===============================================
+class LumoraAppMain extends StatelessWidget {
+  const LumoraAppMain({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Lumora',
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: Colors.black,
+      ),
+      home: const HomeScreen(),
+    );
+  }
+}
+
+/// -------------------
+/// HOME SCREEN
+/// -------------------
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  @override
+
+  Widget build(BuildContext context) {
+    final accessibilitySettings = Provider.of<AccessibilitySettings>(context);
+    final isHighContrast = accessibilitySettings.highContrast;
+    final colorVisionMode = accessibilitySettings.colorVisionMode;
+
+    return ColorFiltered(
+      colorFilter: ColorFilter.matrix(ColorBlindFilters.getFilter(colorVisionMode)),
+      child: Scaffold(
+        backgroundColor: isHighContrast ? HighContrastTheme.background : Colors.black,
+
+
+        drawer: Drawer(
+          backgroundColor: const Color(0xFF0F1A2E),
+          child: Column(
+            children: [
+              DrawerHeader(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF0A1128), Color(0xFF0F1A2E)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF60A5FA), Color(0xFF3B82F6)],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.palette, color: Colors.white, size: 24),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      "Lumora",
+                      style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                    ),
+                    const Text(
+                      "Color Detection Pro",
+                      style: TextStyle(color: Colors.white54, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.history, color: Colors.white70),
+                title: const Text('History', style: TextStyle(color: Colors.white, fontSize: 16)),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => ColorHistoryScreen()));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.psychology, color: Colors.white70),
+                title: const Text('Color Vision Test', style: TextStyle(color: Colors.white, fontSize: 16)),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const ColorVisionTest()));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.settings, color: Colors.white70),
+                title: const Text('Settings', style: TextStyle(color: Colors.white, fontSize: 16)),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsScreen()));
+                },
+              ),
+              const Divider(color: Colors.white24, thickness: 1, indent: 16, endIndent: 16),
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.white70),
+                title: const Text('Log Out', style: TextStyle(color: Colors.white, fontSize: 16)),
+                onTap: () async {
+                  SharedPreferences prefs = await SharedPreferences.getInstance();
+                  prefs.setBool("loggedIn", false);
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(builder: (_) => AuthIntroScreen()),
+                        (route) => false,
+                  );
+                },
+              ),
+              const Spacer(),
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Lumora v1.0.0\n© 2024 Lumora Technologies',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white38, fontSize: 10),
+                ),
+              ),
+            ],
+          ),
+        ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              // Top Bar
+              Container(
+                height: 80,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: Color(0xFF1F1F1F))),
+                ),
+                child: Row(
+                  children: [
+                    // Menu Button
+                    Builder(
+                      builder: (context) => Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF3B82F6).withOpacity(0.2),
+                          border: Border.all(color: const Color(0xFF3B82F6).withOpacity(0.4), width: 2),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: IconButton(
+                          icon: const Icon(Icons.menu, color: Color(0xFF60A5FA), size: 28),
+                          onPressed: () => Scaffold.of(context).openDrawer(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    // Logo and Status
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF60A5FA), Color(0xFF3B82F6)],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.palette, color: Colors.white, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Lumora',
+                          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        Row(
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF3B82F6),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            const Text(
+                              'Ready to Scan',
+                              style: TextStyle(color: Colors.white54, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => UserInfoListScreen()),
+                        );
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF3B82F6).withOpacity(0.1),
+                          border: Border.all(color: const Color(0xFF3B82F6).withOpacity(0.2)),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: const [
+                            Text(
+                              'Pro Mode',
+                              style: TextStyle(color: Color(0xFF60A5FA), fontSize: 12, fontWeight: FontWeight.w600),
+                            ),
+                            SizedBox(width: 4),
+                            Icon(Icons.people, color: Color(0xFF60A5FA), size: 14),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                  ],
+                ),
+              ),
+              // Main Content
+              Expanded(
+                child: Center(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        // Welcome Section
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: const [
+                            Icon(Icons.auto_awesome, color: Color(0xFF60A5FA), size: 24),
+                            SizedBox(width: 8),
+                            Text(
+                              'WELCOME TO',
+                              style: TextStyle(
+                                color: Color(0xFF60A5FA),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 2,
+                              ),
+                            ),
+                            SizedBox(width: 8),
+                            Icon(Icons.auto_awesome, color: Color(0xFF60A5FA), size: 24),
+                          ],
+                        ),
+                        const SizedBox(height: 24),
+                        const Text(
+                          'LUMORA',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 72,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -2,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          width: 200,
+                          height: 2,
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [Colors.transparent, Color(0xFF3B82F6), Colors.transparent],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        const Text(
+                          'Advanced Color Vision & Detection System',
+                          style: TextStyle(color: Colors.white54, fontSize: 18, fontWeight: FontWeight.w300),
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Identify colors with precision • Test your vision • Explore palettes',
+                          style: TextStyle(color: Colors.white38, fontSize: 12),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 60),
+
+                        // Action Cards
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () async {
+                                    final status = await Permission.camera.request();
+                                    if (status.isGranted) {
+                                      final cameras = await availableCameras();
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => CameraScannerPage(cameras: cameras),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  child: _buildActionCard(
+                                    icon: Icons.camera_alt,
+                                    title: 'Camera',
+                                    description: 'Point and scan any object to detect colors instantly in real-time',
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () async {
+                                    final picker = ImagePicker();
+                                    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+                                    if (image != null) {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => UploadResultScreen(imageFile: File(image.path)),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  child: _buildActionCard(
+                                    icon: Icons.upload_file,
+                                    title: 'Upload',
+                                    description: 'Upload images to extract and analyze complete color palettes',
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 60),
+
+                        // Stats
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _buildStat('16M+', 'Colors'),
+                            Container(width: 1, height: 48, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 24)),
+                            _buildStat('99%', 'Accuracy'),
+                            Container(width: 1, height: 48, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 24)),
+                            _buildStat('Instant', 'Detection'),
+
+
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  Widget _buildActionCard({required IconData icon, required String title, required String description}) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0A1128), Color(0xFF0F1A2E)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFF1E40AF).withOpacity(0.3), width: 2),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF60A5FA), Color(0xFF3B82F6)],
+              ),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Icon(icon, color: Colors.white, size: 40),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            title,
+            style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            description,
+            style: const TextStyle(color: Colors.white54, fontSize: 13),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStat(String value, String label) {
+    return Column(
+      children: [
+        Text(value, style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+      ],
+    );
+  }
+}
+
+/// ---------------------------
+/// CAMERA SCANNER
+/// ---------------------------
+class CameraScannerPage extends StatefulWidget {
+  final List<CameraDescription> cameras;
+  const CameraScannerPage({required this.cameras, super.key});
+
+  @override
+  State<CameraScannerPage> createState() => _CameraScannerPageState();
+}
+class _CameraScannerPageState extends State<CameraScannerPage> {
+  Color? detectedColor;
+  String detectedColorName = "Tap to detect color";
+  String detectedHex = "";
+  String detectedRgb = "";
+  Offset? lastTapPosition;
+
+  CameraController? controller;
+  bool isReady = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initCamera();
+  }
+
+  Future<void> _initCamera() async {
+    controller = CameraController(widget.cameras.first, ResolutionPreset.high);
+    await controller!.initialize();
+    if (!mounted) return;
+    setState(() => isReady = true);
+  }
+
+  Future<void> _capture() async {
+    if (controller == null || !controller!.value.isInitialized) return;
+    final file = await controller!.takePicture();
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => UploadResultScreen(imageFile: File(file.path))),
+    );
+  }
+
+  // THEIR WORKING DETECTION METHOD - INTEGRATED INTO YOUR CODE
+  Future<void> _detectColor(Offset position) async {
+    if (controller == null || !controller!.value.isInitialized) {
+      return;
+    }
+
+    try {
+      final image = await controller!.takePicture();
+      final bytes = await image.readAsBytes();
+      final decodedImage = img.decodeImage(bytes);
+
+      if (decodedImage != null) {
+        // Get the camera preview size
+        final size = MediaQuery.of(context).size;
+        final deviceRatio = size.width / size.height;
+        final cameraRatio = controller!.value.aspectRatio;
+
+        // Calculate the actual image coordinates
+        int x, y;
+
+        if (cameraRatio > deviceRatio) {
+          // Image is wider, height matches
+          final scale = decodedImage.height / size.height;
+          final imageWidth = size.width * scale;
+          final leftOffset = (decodedImage.width - imageWidth) / 2;
+
+          x = (leftOffset + (position.dx * scale)).toInt();
+          y = (position.dy * scale).toInt();
+        } else {
+          // Image is taller, width matches
+          final scale = decodedImage.width / size.width;
+          final imageHeight = size.height * scale;
+          final topOffset = (decodedImage.height - imageHeight) / 2;
+
+          x = (position.dx * scale).toInt();
+          y = (topOffset + (position.dy * scale)).toInt();
+        }
+
+        // Clamp coordinates to image bounds
+        x = x.clamp(0, decodedImage.width - 1);
+        y = y.clamp(0, decodedImage.height - 1);
+
+        // Get pixel color
+        final pixel = decodedImage.getPixel(x, y);
+        final r = pixel.r.toInt();
+        final g = pixel.g.toInt();
+        final b = pixel.b.toInt();
+
+        setState(() {
+          detectedColor = Color.fromRGBO(r, g, b, 1);
+          detectedColorName = _getColorName(r, g, b);
+          detectedHex = '#${r.toRadixString(16).padLeft(2, '0').toUpperCase()}'
+              '${g.toRadixString(16).padLeft(2, '0').toUpperCase()}'
+              '${b.toRadixString(16).padLeft(2, '0').toUpperCase()}';
+          detectedRgb = 'RGB($r, $g, $b)';
+          lastTapPosition = position;
+        });
+      }
+    } catch (e) {
+      print('Error detecting color: $e');
+    }
+  }
+
+  String _getColorName(int r, int g, int b) {
+    // Convert RGB to HSL for better color detection
+    double rNorm = r / 255.0;
+    double gNorm = g / 255.0;
+    double bNorm = b / 255.0;
+
+    double max = [rNorm, gNorm, bNorm].reduce((a, b) => a > b ? a : b);
+    double min = [rNorm, gNorm, bNorm].reduce((a, b) => a < b ? a : b);
+    double delta = max - min;
+
+    double lightness = (max + min) / 2;
+    double saturation = delta == 0 ? 0 : delta / (1 - (2 * lightness - 1).abs());
+
+    // Calculate hue
+    double hue = 0;
+    if (delta != 0) {
+      if (max == rNorm) {
+        hue = 60 * (((gNorm - bNorm) / delta) % 6);
+      } else if (max == gNorm) {
+        hue = 60 * (((bNorm - rNorm) / delta) + 2);
+      } else {
+        hue = 60 * (((rNorm - gNorm) / delta) + 4);
+      }
+    }
+    if (hue < 0) hue += 360;
+
+    // Handle grayscale colors
+    if (saturation < 0.1) {
+      if (lightness < 0.2) return 'Black';
+      if (lightness > 0.8) return 'White';
+      return 'Gray';
+    }
+
+    // Special handling for pink (light red with high lightness)
+    if ((hue >= 330 || hue < 30) && lightness > 0.6 && saturation > 0.2) {
+      return 'Pink';
+    }
+
+    // Special handling for brown (dark orange/red-orange)
+    if (hue >= 10 && hue < 50 && lightness < 0.5 && saturation > 0.2) {
+      return 'Brown';
+    }
+
+    // Determine color name based on hue ranges
+    if (hue >= 345 || hue < 10) return 'Red';
+    if (hue < 25) return 'Red-Orange';
+    if (hue < 45) return 'Orange';
+    if (hue < 70) return 'Yellow';
+    if (hue < 80) return 'Yellow-Green';
+    if (hue < 165) return 'Green';
+    if (hue < 200) return 'Cyan';
+    if (hue < 240) return 'Blue';
+    if (hue < 260) return 'Blue-Purple';
+    if (hue < 290) return 'Purple';
+    if (hue < 320) return 'Magenta';
+    if (hue < 330) return 'Pink';
+    return 'Red';
+  }
+
+  @override
+  void dispose() {
+    controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!isReady) {
+      return const Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: CircularProgressIndicator(color: Color(0xFF3B82F6)),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
+        children: [
+          // Camera Preview with Tap Detection
+          Positioned.fill(
+            child: GestureDetector(
+              onTapDown: (details) {
+                _detectColor(details.localPosition);
+              },
+              child: CameraPreview(controller!),
+            ),
+          ),
+
+          // Back Button
+          Positioned(
+            top: 50,
+            left: 20,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.5),
+                shape: BoxShape.circle,
+              ),
+              child: IconButton(
+                icon: const Icon(Icons.arrow_back, color: Colors.white, size: 28),
+                onPressed: () => Navigator.pop(context),
+              ),
+            ),
+          ),
+
+          // Tap indicator circle (shows where you tapped)
+          if (lastTapPosition != null)
+            Positioned(
+              left: lastTapPosition!.dx - 20,
+              top: lastTapPosition!.dy - 20,
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white, width: 3),
+                ),
+              ),
+            ),
+
+          // Detected Color Display (Above Capture Button)
+          Positioned(
+            bottom: 160,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                decoration: BoxDecoration(
+                  color: detectedColor ?? Colors.grey.withOpacity(0.8),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.white, width: 3),
+                  boxShadow: [
+                    BoxShadow(
+                      color: (detectedColor ?? Colors.grey).withOpacity(0.6),
+                      blurRadius: 20,
+                      spreadRadius: 5,
+                    ),
+                  ],
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      detectedColorName,
+                      style: TextStyle(
+                        color: (detectedColor?.computeLuminance() ?? 0.5) > 0.5
+                            ? Colors.black
+                            : Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (detectedHex.isNotEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        detectedHex,
+                        style: TextStyle(
+                          color: (detectedColor?.computeLuminance() ?? 0.5) > 0.5
+                              ? Colors.black54
+                              : Colors.white70,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                    if (detectedRgb.isNotEmpty) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        detectedRgb,
+                        style: TextStyle(
+                          color: (detectedColor?.computeLuminance() ?? 0.5) > 0.5
+                              ? Colors.black54
+                              : Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          // Capture Button
+          Positioned(
+            bottom: 50,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: GestureDetector(
+                onTap: _capture,
+                child: Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white, width: 5),
+                  ),
+                  child: Center(
+                    child: Container(
+                      width: 60,
+                      height: 60,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+/// ---------------------------
+/// UPLOAD RESULT SCREEN
+/// ---------------------------
+class UploadResultScreen extends StatefulWidget {
+  final File imageFile;
+  const UploadResultScreen({required this.imageFile, super.key});
+
+  @override
+  State<UploadResultScreen> createState() => _UploadResultScreenState();
+}
+
+class _UploadResultScreenState extends State<UploadResultScreen> {
+  Color? detectedColor;
+  String detectedColorName = "Tap to detect color";
+  String detectedHex = "";
+  String detectedRgb = "";
+  Offset? lastTapPosition;
+
+  Color dominantColor = Colors.white;
+  String hex = "", rgb = "", shade = "";
+  bool isLoading = true;
+
+  @override
+
+  void initState() {
+    super.initState();
+    // Don't call _detectColor on init since it needs a tap position
+    setState(() {
+      isLoading = false;
+    });
+  }
+
+  GlobalKey _imageKey = GlobalKey(); // Add this at the top of the class
+
+  void _detectColor(Offset tapPosition) async {
+    try {
+      final bytes = await widget.imageFile.readAsBytes();
+      final image = img.decodeImage(bytes);
+      if (image == null) return;
+
+      // Get the actual rendered size of the image widget
+      final RenderBox? renderBox = _imageKey.currentContext?.findRenderObject() as RenderBox?;
+      if (renderBox == null) {
+        print("RenderBox is null");
+        return;
+      }
+
+      // Get the actual displayed size
+      final widgetWidth = renderBox.size.width;
+      final widgetHeight = renderBox.size.height;
+
+      print("Widget size: $widgetWidth x $widgetHeight");
+      print("Image size: ${image.width} x ${image.height}");
+      print("Tap position: ${tapPosition.dx}, ${tapPosition.dy}");
+
+      // Image dimensions
+      final imageWidth = image.width;
+      final imageHeight = image.height;
+
+      // Calculate aspect ratios
+      final imageAspect = imageWidth / imageHeight;
+      final widgetAspect = widgetWidth / widgetHeight;
+
+      double scale;
+      double offsetX = 0;
+      double offsetY = 0;
+
+      if (widgetAspect > imageAspect) {
+        // Widget is wider - image height fills, width is centered
+        scale = widgetHeight / imageHeight;
+        final scaledWidth = imageWidth * scale;
+        offsetX = (widgetWidth - scaledWidth) / 2;
+      } else {
+        // Widget is taller - image width fills, height is centered
+        scale = widgetWidth / imageWidth;
+        final scaledHeight = imageHeight * scale;
+        offsetY = (widgetHeight - scaledHeight) / 2;
+      }
+
+      print("Scale: $scale, Offset: $offsetX, $offsetY");
+
+      // Map tap coordinates to image coordinates
+      final imageX = ((tapPosition.dx - offsetX) / scale).round().clamp(0, imageWidth - 1);
+      final imageY = ((tapPosition.dy - offsetY) / scale).round().clamp(0, imageHeight - 1);
+
+      print("Image coordinates: $imageX, $imageY");
+
+      // Get pixel color
+      final pixel = image.getPixel(imageX, imageY);
+      final r = pixel.r.toInt();
+      final g = pixel.g.toInt();
+      final b = pixel.b.toInt();
+
+      print("RGB: $r, $g, $b");
+
+      setState(() {
+        detectedColor = Color.fromARGB(255, r, g, b);
+        detectedColorName = _getShadeName(r, g, b);
+        detectedHex =
+        '#${r.toRadixString(16).padLeft(2,'0').toUpperCase()}${g.toRadixString(16).padLeft(2,'0').toUpperCase()}${b.toRadixString(16).padLeft(2,'0').toUpperCase()}';
+        detectedRgb = 'RGB($r, $g, $b)';
+        lastTapPosition = tapPosition;
+      });
+    } catch(e) {
+      print("Error detecting color on upload: $e");
+    }
+  }
+  String _getShadeName(int r, int g, int b) {
+    // Essential color database with ~45 colors
+    final Map<String, List<int>> colorDatabase = {
+      // ==================== REDS ====================
+      'Red': [255, 0, 0],
+      'Dark Red': [139, 0, 0],
+      'Crimson': [220, 20, 60],
+      'Maroon': [128, 0, 0],
+      'Salmon': [250, 128, 114],
+
+      // ==================== ORANGES ====================
+      'Orange': [255, 165, 0],
+      'Dark Orange': [255, 140, 0],
+      'Coral': [255, 127, 80],
+      'Peach': [255, 218, 185],
+
+      // ==================== YELLOWS ====================
+      'Yellow': [255, 255, 0],
+      'Gold': [255, 215, 0],
+      'Khaki': [240, 230, 140],
+      'Cream': [255, 253, 208],
+
+      // ==================== GREENS ====================
+      'Green': [0, 128, 0],
+      'Dark Green': [0, 100, 0],
+      'Lime': [0, 255, 0],
+      'Light Green': [144, 238, 144],
+      'Mint': [189, 252, 201],
+      'Olive': [128, 128, 0],
+      'Emerald': [80, 200, 120],
+
+      // ==================== BLUES ====================
+      'Blue': [0, 0, 255],
+      'Dark Blue': [0, 0, 139],
+      'Navy': [0, 0, 128],
+      'Sky Blue': [135, 206, 235],
+      'Light Blue': [173, 216, 230],
+
+      // ==================== CYANS & TEALS ====================
+      'Cyan': [0, 255, 255],
+      'Turquoise': [64, 224, 208],
+      'Teal': [0, 128, 128],
+
+      // ==================== PURPLES ====================
+      'Purple': [128, 0, 128],
+      'Dark Purple': [48, 25, 52],
+      'Violet': [238, 130, 238],
+      'Lavender': [230, 230, 250],
+      'Indigo': [75, 0, 130],
+
+      // ==================== PINKS ====================
+      'Pink': [255, 192, 203],
+      'Hot Pink': [255, 105, 180],
+      'Magenta': [255, 0, 255],
+      'Rose': [255, 0, 127],
+
+      // ==================== BROWNS ====================
+      'Brown': [165, 42, 42],
+      'Dark Brown': [101, 67, 33],
+      'Tan': [210, 180, 140],
+      'Beige': [245, 245, 220],
+
+      // ==================== GRAYS & NEUTRALS ====================
+      'White': [255, 255, 255],
+      'Light Gray': [211, 211, 211],
+      'Gray': [128, 128, 128],
+      'Dark Gray': [169, 169, 169],
+      'Black': [0, 0, 0],
+    };
+
+    // Find the closest color using Euclidean distance
+    String closestColorName = 'Unknown';
+    double minDistance = double.infinity;
+
+    colorDatabase.forEach((name, rgb) {
+      // Calculate Euclidean distance in 3D RGB space
+      double distance = sqrt(
+          pow(r - rgb[0], 2) +
+              pow(g - rgb[1], 2) +
+              pow(b - rgb[2], 2)
+      );
+
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestColorName = name;
+      }
+    });
+
+    return closestColorName;
+  }
+  void _copyToClipboard(String text) {
+    Clipboard.setData(ClipboardData(text: text));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Copied to clipboard!'), duration: Duration(seconds: 1)),
+    );
+  }
+
+  @override
+
+  @override
+  Widget build(BuildContext context) {
+    final accessibilitySettings = Provider.of<AccessibilitySettings>(context);
+    final isHighContrast = accessibilitySettings.highContrast;
+    final colorVisionMode = accessibilitySettings.colorVisionMode;
+
+    return ColorFiltered(
+      colorFilter: ColorFilter.matrix(ColorBlindFilters.getFilter(colorVisionMode)),
+      child: Scaffold(
+        backgroundColor: isHighContrast ? HighContrastTheme.background : Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white),
+            onPressed: () => Navigator.pop(context),
+          ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.share, color: Colors.white),
+              onPressed: () {},
+            ),
+          ],
+        ),
+        body: isLoading
+            ? const Center(
+            child: CircularProgressIndicator(color: Color(0xFF3B82F6)))
+            : SafeArea(
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                const SizedBox(height: 40),
+
+                // Image with tap detection - CORRECTED
+                Center(
+                  child: GestureDetector(
+                    onTapDown: (details) {
+                      // Get the position relative to the GestureDetector
+                      _detectColor(details.localPosition);
+                    },
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 16),
+                      width: double.infinity,
+                      height: 300,
+                      color: Colors.black, // background for empty space
+                      child: Image.file(
+                        widget.imageFile,
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 40),
+
+                // Large Color Display
+                Container(
+                  key: _imageKey,
+                  margin: const EdgeInsets.symmetric(horizontal: 32),
+                  width: double.infinity,
+                  height: 200,
+                  decoration: BoxDecoration(
+                    color: detectedColor ?? Colors.grey,
+                    borderRadius: BorderRadius.circular(24),
+                    boxShadow: [
+                      BoxShadow(
+                        color: (detectedColor ?? Colors.grey).withOpacity(0.5),
+                        blurRadius: 30,
+                        spreadRadius: 5,
+                      ),
+                    ],
+                  ),
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          detectedColorName,
+                          style: TextStyle(
+                            color: (detectedColor?.computeLuminance() ?? 0.5) > 0.5
+                                ? Colors.black
+                                : Colors.white,
+                            fontSize: 36,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          detectedHex,
+                          style: TextStyle(
+                            color: (detectedColor?.computeLuminance() ?? 0.5) > 0.5
+                                ? Colors.black54
+                                : Colors.white70,
+                            fontSize: 20,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 60),
+
+                // Color Details Section
+                const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 32),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Color Details',
+                      style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Detail Cards
+                if (detectedHex.isNotEmpty)
+                  _buildDetailCard('HEX Code', detectedHex),
+                if (detectedRgb.isNotEmpty)
+                  _buildDetailCard('RGB Values', detectedRgb),
+                if (detectedColorName.isNotEmpty)
+                  _buildDetailCard('Closest Shade', detectedColorName),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDetailCard(String label, String value) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 32, vertical: 8),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF16213E),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label, style: const TextStyle(color: Colors.white54, fontSize: 14)),
+              const SizedBox(height: 4),
+              Text(value, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          IconButton(
+            icon: const Icon(Icons.copy, color: Colors.white54),
+            onPressed: () => _copyToClipboard(value),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+
+/// ---------------------------
+/// COLOR VISION TEST
+/// ---------------------------
+class ColorVisionTest extends StatefulWidget {
+  const ColorVisionTest({super.key});
+
+  @override
+  State<ColorVisionTest> createState() => _ColorVisionTestState();
+}
+
+class _ColorVisionTestState extends State<ColorVisionTest> {
+  int currentQuestion = 0;
+  int correctAnswer = 4;
+  List<int> options = [];
+  Color bgColor = Colors.grey;
+  Color numberColor = Colors.black;
+  String colorBlindnessType = '';
+  int correctCount = 0;
+  List<String> wrongTypes = [];
+  final random = Random();
+
+  @override
+  void initState() {
+    super.initState();
+    _generateQuestion();
+  }
+
+  void _generateQuestion() {
+    correctAnswer = random.nextInt(9) + 1;
+
+    List<Map<String, dynamic>> colorPairs = [
+      {
+        'bg': const Color(0xFFB2D8B2),
+        'num': const Color(0xFFFF3333),
+        'type': 'Control (Normal Vision)',
+      },
+      {
+        'bg': const Color(0xFF8B4513),
+        'num': const Color(0xFF4CAF50),
+        'type': 'Protanopia/Protanomaly',
+      },
+      {
+        'bg': const Color(0xFFBFD200),
+        'num': const Color(0xFFFF7043),
+        'type': 'Deuteranopia/Deuteranomaly',
+      },
+      {
+        'bg': const Color(0xFF1565C0),
+        'num': const Color(0xFFFFEB3B),
+        'type': 'Tritanopia/Tritanomaly',
+      },
+      {
+        'bg': const Color(0xFFA8C3A0),
+        'num': const Color(0xFFD500F9),
+        'type': 'Mild/Partial Color Deficiency',
+      },
+    ];
+
+    var pair = colorPairs[currentQuestion];
+    bgColor = pair['bg'];
+    numberColor = pair['num'];
+    colorBlindnessType = pair['type'];
+
+    options = [correctAnswer];
+    while (options.length < 3) {
+      int n = random.nextInt(9) + 1;
+      if (!options.contains(n)) options.add(n);
+    }
+    options.shuffle();
+  }
+
+  void _checkAnswer(int selected) {
+    bool correct = selected == correctAnswer;
+
+    if (correct) {
+      correctCount++;
+    } else {
+      wrongTypes.add(colorBlindnessType);
+    }
+
+    setState(() {
+      currentQuestion++;
+      if (currentQuestion < 5) {
+        _generateQuestion();
+      } else {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => ResultScreen(
+              correctCount: correctCount,
+              totalQuestions: 5,
+              wrongTypes: wrongTypes,
+            ),
+          ),
+        );
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    "Color Vision Test",
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text("Skip", style: TextStyle(color: Colors.white70, fontSize: 16)),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              "What number do you see?",
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 25),
+            Center(
+              child: Container(
+                width: 300,
+                height: 300,
+                decoration: BoxDecoration(
+                  color: bgColor,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Center(
+                  child: Text(
+                    correctAnswer.toString(),
+                    style: TextStyle(fontSize: 180, fontWeight: FontWeight.bold, color: numberColor),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 40),
+            Column(
+              children: [
+                for (int opt in options)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 8),
+                    child: SizedBox(
+                      width: double.infinity,
+                      height: 60,
+                      child: ElevatedButton(
+                        onPressed: () => _checkAnswer(opt),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF1C1C1E),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(40)),
+                        ),
+                        child: Text(opt.toString(), style: const TextStyle(fontSize: 22, color: Colors.white)),
+                      ),
+                    ),
+                  ),
+                const SizedBox(height: 25),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class ResultScreen extends StatelessWidget {
+  final int correctCount;
+  final int totalQuestions;
+  final List<String> wrongTypes;
+
+  const ResultScreen({
+    super.key,
+    required this.correctCount,
+    required this.totalQuestions,
+    required this.wrongTypes,
+  });
+
+  @override
+
+  Widget build(BuildContext context) {
+    final isPerfect = correctCount == totalQuestions;
+    final percentage = (correctCount / totalQuestions * 100).toInt();
+
+    String resultMessage;
+    String advice;
+
+    if (isPerfect) {
+      resultMessage = "Perfect Vision!";
+      advice = "Your color vision appears to be normal. Great job!";
+    } else if (percentage >= 60) {
+      resultMessage = "Good Vision";
+      advice = "Your color vision is mostly normal, but consider consulting an eye specialist.";
+    } else {
+      resultMessage = "Needs Attention";
+      advice = "You may have some color vision deficiency. Please consult an eye care professional.";
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  isPerfect ? Icons.check_circle : Icons.info_outline,
+                  color: isPerfect ? Colors.green : Colors.orange,
+                  size: 100,
+                ),
+                const SizedBox(height: 32),
+                Text(
+                  resultMessage,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 32,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  'Score: $correctCount / $totalQuestions',
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 24,
+                  ),
+                ),
+                const SizedBox(height: 32),
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF1C1C1E),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Text(
+                    advice,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                    ),
+                  ),
+                ),
+                if (wrongTypes.isNotEmpty) ...[
+                  const SizedBox(height: 24),
+                  Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF2C2C2E),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Possible Issues:',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        ...wrongTypes.toSet().map((type) => Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.fiber_manual_record, color: Colors.orange, size: 12),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  type,
+                                  style: const TextStyle(color: Colors.white70, fontSize: 14),
+                                ),
+                              ),
+                            ],
+                          ),
+                        )),
+                      ],
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 40),
+                SizedBox(
+                  width: double.infinity,
+                  height: 60,
+                  child: ElevatedButton(
+                    onPressed: () {
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(builder: (_) => const ColorVisionTest()),
+                      );
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF3B82F6),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                    child: const Text(
+                      'Retry Test',
+                      style: TextStyle(fontSize: 18, color: Colors.white),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  height: 60,
+                  child: OutlinedButton(
+                    onPressed: () {
+                      Navigator.pushAndRemoveUntil(
+                        context,
+                        MaterialPageRoute(builder: (_) => const HomeScreen()),
+                            (route) => false,
+                      );
+                    },
+                    style: OutlinedButton.styleFrom(
+                      side: const BorderSide(color: Colors.white54),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    ),
+                    child: const Text(
+                      'Go Home',
+                      style: TextStyle(fontSize: 18, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
