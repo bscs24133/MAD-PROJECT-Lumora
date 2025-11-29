@@ -1,0 +1,39 @@
+name: untitled16
+description: "A new Flutter project."
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.9.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  provider: ^6.1.1
+  shared_preferences: ^2.2.2
+  cupertino_icons: ^1.0.8
+  camera: ^0.11.0
+  permission_handler: ^11.0.1
+  image_picker: ^1.1.2
+  share_plus: ^7.2.0
+  clipboard: ^0.1.3
+  image: ^4.0.17
+  path_provider: ^2.1.4
+  image_picker_for_web: ^3.0.0
+  firebase_core: ^2.24.2
+  cloud_firestore: ^4.13.6
+  firebase_auth: ^4.17.1
+
+  # 👉 FIXED — MUST be in dependencies, not dev_dependencies
+  color_models: ^2.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
