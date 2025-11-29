@@ -1701,67 +1701,113 @@ class _UploadResultScreenState extends State<UploadResultScreen> {
       'Red': [255, 0, 0],
       'Dark Red': [139, 0, 0],
       'Crimson': [220, 20, 60],
+      'Firebrick': [178, 34, 34],
+      'Tomato': [255, 99, 71],
+      'Cherry Red': [222, 49, 99],
+      'Rose Red': [194, 30, 86],
+      'Ruby Red': [155, 17, 30],
+      'Blood Red': [102, 0, 0],
+      'Candy Apple': [255, 8, 0],
+      'Ferrari Red': [255, 40, 0],
       'Maroon': [128, 0, 0],
-      'Salmon': [250, 128, 114],
 
-      // ==================== ORANGES ====================
       'Orange': [255, 165, 0],
       'Dark Orange': [255, 140, 0],
       'Coral': [255, 127, 80],
       'Peach': [255, 218, 185],
+      'Tangerine': [242, 133, 0],
+      'Burnt Orange': [204, 85, 0],
+      'Carrot': [237, 145, 33],
+      'Pumpkin': [255, 117, 24],
+      'Marigold': [234, 162, 33],
+      'Persimmon': [236, 88, 0],
 
-      // ==================== YELLOWS ====================
       'Yellow': [255, 255, 0],
+      'Light Yellow': [255, 255, 224],
+      'Lemon': [255, 247, 0],
       'Gold': [255, 215, 0],
-      'Khaki': [240, 230, 140],
+      'Mustard': [255, 219, 88],
+      'Goldenrod': [218, 165, 32],
+      'Saffron': [244, 196, 48],
       'Cream': [255, 253, 208],
+      'Daffodil': [255, 255, 49],
+      'Banana': [255, 225, 53],
 
-      // ==================== GREENS ====================
       'Green': [0, 128, 0],
       'Dark Green': [0, 100, 0],
       'Lime': [0, 255, 0],
-      'Light Green': [144, 238, 144],
-      'Mint': [189, 252, 201],
+      'Forest Green': [34, 139, 34],
       'Olive': [128, 128, 0],
+      'Mint': [152, 255, 152],
+      'Teal': [0, 128, 128],
+      'Chartreuse': [127, 255, 0],
+      'Lawn Green': [124, 252, 0],
+      'Kelly Green': [76, 187, 23],
       'Emerald': [80, 200, 120],
+      'Shamrock': [0, 158, 96],
+      'Pistachio': [147, 197, 114],
+      'Sage': [188, 184, 138],
+      'Moss Green': [138, 154, 91],
 
-      // ==================== BLUES ====================
+      'Cyan': [0, 255, 255],
+      'Aqua': [0, 255, 255],
+      'Turquoise': [64, 224, 208],
+      'Medium Turquoise': [72, 209, 204],
+      'Dark Turquoise': [0, 206, 209],
+      'Robin Egg Blue': [0, 204, 204],
+      'Caribbean Blue': [0, 204, 204],
+
       'Blue': [0, 0, 255],
       'Dark Blue': [0, 0, 139],
       'Navy': [0, 0, 128],
+      'Royal Blue': [65, 105, 225],
       'Sky Blue': [135, 206, 235],
       'Light Blue': [173, 216, 230],
+      'Dodger Blue': [30, 144, 255],
+      'Steel Blue': [70, 130, 180],
+      'Cornflower Blue': [100, 149, 237],
+      'Cobalt Blue': [0, 71, 171],
+      'Sapphire': [15, 82, 186],
+      'Azure': [240, 255, 255],
+      'Ice Blue': [175, 238, 238],
+      'Carolina Blue': [86, 160, 211],
+      'Denim': [21, 96, 189],
 
-      // ==================== CYANS & TEALS ====================
-      'Cyan': [0, 255, 255],
-      'Turquoise': [64, 224, 208],
-      'Teal': [0, 128, 128],
-
-      // ==================== PURPLES ====================
       'Purple': [128, 0, 128],
       'Dark Purple': [48, 25, 52],
+      'Indigo': [75, 0, 130],
       'Violet': [238, 130, 238],
       'Lavender': [230, 230, 250],
-      'Indigo': [75, 0, 130],
+      'Orchid': [218, 112, 214],
+      'Medium Purple': [147, 112, 219],
+      //'Amethyst': [153, 102, 204],
 
-      // ==================== PINKS ====================
       'Pink': [255, 192, 203],
       'Hot Pink': [255, 105, 180],
-      'Magenta': [255, 0, 255],
+      'Deep Pink': [255, 20, 147],
       'Rose': [255, 0, 127],
+      'Blush': [222, 93, 131],
+      'Bubblegum': [255, 193, 204],
+      'Flamingo': [252, 142, 172],
+      'Carnation Pink': [255, 166, 201],
 
-      // ==================== BROWNS ====================
       'Brown': [165, 42, 42],
       'Dark Brown': [101, 67, 33],
+      'Sienna': [160, 82, 45],
+      'Chocolate': [210, 105, 30],
       'Tan': [210, 180, 140],
       'Beige': [245, 245, 220],
+      'Walnut': [119, 63, 26],
 
-      // ==================== GRAYS & NEUTRALS ====================
-      'White': [255, 255, 255],
-      'Light Gray': [211, 211, 211],
-      'Gray': [128, 128, 128],
-      'Dark Gray': [169, 169, 169],
+
       'Black': [0, 0, 0],
+      'White': [255, 255, 255],
+      'Gray': [128, 128, 128],
+      'Silver': [192, 192, 192],
+      'Charcoal': [54, 69, 79],
+      'Light Gray': [211, 211, 211],
+      'Ash Gray': [178, 190, 181],
+      'Ivory': [255, 255, 240]
     };
 
     // Find the closest color using Euclidean distance
@@ -2061,6 +2107,7 @@ class _ColorVisionTestState extends State<ColorVisionTest> {
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
+        child:SingleChildScrollView(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -2128,6 +2175,7 @@ class _ColorVisionTestState extends State<ColorVisionTest> {
           ],
         ),
       ),
+      ),
     );
   }
 }
@@ -2167,7 +2215,7 @@ class ResultScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: Center(
+        child:SingleChildScrollView(
           child: Padding(
             padding: const EdgeInsets.all(32),
             child: Column(
