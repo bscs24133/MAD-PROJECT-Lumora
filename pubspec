@@ -1,0 +1,35 @@
+  name: untitled16
+  description: "A new Flutter project."
+  publish_to: 'none'
+
+  version: 1.0.0+1
+
+  environment:
+    sdk: ">=3.9.0 <4.0.0"
+
+  dependencies:
+      flutter:
+          sdk: flutter
+      # ADD THESE FIREBASE PACKAGES:
+      firebase_core: ^2.24.0
+      firebase_auth: ^4.18.1
+      cloud_firestore: ^4.13.0
+      # Your existing packages remain the same
+      camera: ^0.10.5
+      permission_handler: ^11.0.1
+      image_picker: ^1.0.4
+      image: ^4.0.17
+      shared_preferences: ^2.2.2
+      provider: ^6.1.1
+      firebase_storage: ^11.3.1
+    # 👉 FIXED — MUST be in dependencies, not dev_dependencies
+      color_models: ^2.0.0
+
+  dev_dependencies:
+    flutter_test:
+      sdk: flutter
+
+    flutter_lints: ^5.0.0
+
+  flutter:
+    uses-material-design: true
