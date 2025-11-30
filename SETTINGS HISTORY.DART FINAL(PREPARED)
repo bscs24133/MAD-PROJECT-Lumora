@@ -1,0 +1,1194 @@
+import 'package:shared_preferences/shared_preferences.dart';
+import 'firebase_service.dart';
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'firebase_options.dart';
+// ==================== STATE MANAGEMENT ====================
+
+class AccessibilitySettings extends ChangeNotifier {
+  bool _highContrast = false;
+  String _colorVisionMode = 'normal';
+
+  bool get highContrast => _highContrast;
+  String get colorVisionMode => _colorVisionMode;
+
+  void setHighContrast(bool value) {
+    _highContrast = value;
+    notifyListeners();
+  }
+
+  void setColorVisionMode(String mode) {
+    _colorVisionMode = mode;
+    notifyListeners();
+  }
+}
+
+// ==================== COLOR BLIND FILTERS ====================
+
+class ColorBlindFilters {
+  static const List<double> normal = [
+    1, 0, 0, 0, 0,
+    0, 1, 0, 0, 0,
+    0, 0, 1, 0, 0,
+    0, 0, 0, 1, 0,
+  ];
+
+  static const List<double> protanopia = [
+    0.567, 0.433, 0, 0, 0,
+    0.558, 0.442, 0, 0, 0,
+    0, 0.242, 0.758, 0, 0,
+    0, 0, 0, 1, 0,
+  ];
+
+  static const List<double> deuteranopia = [
+    0.625, 0.375, 0, 0, 0,
+    0.7, 0.3, 0, 0, 0,
+    0, 0.3, 0.7, 0, 0,
+    0, 0, 0, 1, 0,
+  ];
+
+  static const List<double> tritanopia = [
+    0.95, 0.05, 0, 0, 0,
+    0, 0.433, 0.567, 0, 0,
+    0, 0.475, 0.525, 0, 0,
+    0, 0, 0, 1, 0,
+  ];
+
+  static const List<double> grayscale = [
+    0.2126, 0.7152, 0.0722, 0, 0,
+    0.2126, 0.7152, 0.0722, 0, 0,
+    0.2126, 0.7152, 0.0722, 0, 0,
+    0, 0, 0, 1, 0,
+  ];
+
+  static List<double> getFilter(String mode) {
+    switch (mode) {
+      case 'protanopia':
+        return protanopia;
+      case 'deuteranopia':
+        return deuteranopia;
+      case 'tritanopia':
+        return tritanopia;
+      case 'grayscale':
+        return grayscale;
+      default:
+        return normal;
+    }
+  }
+}
+
+// ==================== THEMES ====================
+
+class HighContrastTheme {
+  static const Color background = Color(0xFF000000);
+  static const Color surface = Color(0xFF000000);
+  static const Color primary = Color(0xFFFFFF00); // Bright yellow
+  static const Color textPrimary = Color(0xFFFFFFFF);
+  static const Color textSecondary = Color(0xFFFFFFFF);
+  static const Color border = Color(0xFFFFFFFF);
+  static const double borderWidth = 3.0;
+}
+
+class NormalTheme {
+  static const Color background = Color(0xFF1A1F36);
+  static const Color surface = Color(0xFF2A3150);
+  static const Color primary = Colors.blue;
+  static const Color textPrimary = Colors.white;
+  static const Color textSecondary = Colors.grey;
+  static const Color border = Colors.white24;
+  static const double borderWidth = 1.0;
+}
+
+// ==================== COLOR ITEM MODEL ====================
+
+class ColorItem {
+  final String id;
+  final Color color;
+  final String name;
+  final String hex;
+  final String rgb;
+  final String date;
+
+  ColorItem({
+    required this.id,
+    required this.color,
+    required this.name,
+    required this.hex,
+    required this.rgb,
+    required this.date,
+  });
+
+  factory ColorItem.fromColor(Color color) {
+    final now = DateTime.now();
+    final hexCode = '#${color.value.toRadixString(16).padLeft(8, '0').toUpperCase().substring(2)}';
+    final rgbCode = 'RGB(${color.red}, ${color.green}, ${color.blue})';
+    String colorName = _getColorName(color);
+
+    return ColorItem(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      color: color,
+      name: colorName,
+      hex: hexCode,
+      rgb: rgbCode,
+      date: '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}',
+    );
+  }
+
+  static String _getColorName(Color color) {
+    if (color.red > 200 && color.green < 100 && color.blue < 100) return 'Red Shade';
+    if (color.green > 200 && color.red < 100 && color.blue < 100) return 'Green Shade';
+    if (color.blue > 200 && color.red < 100 && color.green < 100) return 'Blue Shade';
+    if (color.red > 200 && color.green > 200 && color.blue < 100) return 'Yellow Shade';
+    if (color.red > 200 && color.blue > 200 && color.green < 100) return 'Magenta Shade';
+    if (color.green > 200 && color.blue > 200 && color.red < 100) return 'Cyan Shade';
+    if (color.red > 200 && color.green > 200 && color.blue > 200) return 'White Shade';
+    if (color.red < 50 && color.green < 50 && color.blue < 50) return 'Black Shade';
+
+    final brightness = (color.red * 0.299 + color.green * 0.587 + color.blue * 0.114);
+    if (brightness > 180) return 'Light Color';
+    if (brightness < 80) return 'Dark Color';
+    return 'Custom Color';
+  }
+}
+
+// ==================== SCREEN 1: COLOR HISTORY ====================
+// Replace the ColorHistoryScreen class in settingandhistory.dart with this:
+
+// Add this import
+
+class ColorHistoryScreen extends StatefulWidget {
+  @override
+  _ColorHistoryScreenState createState() => _ColorHistoryScreenState();
+}
+
+class _ColorHistoryScreenState extends State<ColorHistoryScreen> {
+  final FirebaseService _firebaseService = FirebaseService();
+  String? userEmail;
+
+  @override
+  void initState() {
+    super.initState();
+    _getUserEmail();
+  }
+
+  Future<void> _getUserEmail() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    setState(() {
+      userEmail = prefs.getString("activeEmail");
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final accessibilitySettings = Provider.of<AccessibilitySettings>(context);
+    final isHighContrast = accessibilitySettings.highContrast;
+    final colorVisionMode = accessibilitySettings.colorVisionMode;
+
+    if (userEmail == null) {
+      return ColorFiltered(
+        colorFilter: ColorFilter.matrix(ColorBlindFilters.getFilter(colorVisionMode)),
+        child: Scaffold(
+          backgroundColor: isHighContrast ? HighContrastTheme.background : NormalTheme.background,
+          appBar: AppBar(
+            backgroundColor: isHighContrast ? HighContrastTheme.background : NormalTheme.background,
+            title: Text('Color History',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+                )),
+          ),
+          body: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.person_outline,
+                    size: 80,
+                    color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary),
+                SizedBox(height: 16),
+                Text(
+                  'No active user',
+                  style: TextStyle(
+                    color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+                    fontSize: 18,
+                  ),
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Please sign in to view your color history',
+                  style: TextStyle(
+                    color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+                    fontSize: 14,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+    return ColorFiltered(
+      colorFilter: ColorFilter.matrix(ColorBlindFilters.getFilter(colorVisionMode)),
+      child: Scaffold(
+        backgroundColor: isHighContrast ? HighContrastTheme.background : NormalTheme.background,
+        appBar: AppBar(
+          backgroundColor: isHighContrast ? HighContrastTheme.background : NormalTheme.background,
+          elevation: 0,
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Color History',
+                  style: TextStyle(
+                    fontSize: 28,
+                    fontWeight: FontWeight.bold,
+                    color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+                  )),
+              StreamBuilder<List<Map<String, dynamic>>>(
+                stream: _firebaseService.getColorHistory(userEmail!),
+                builder: (context, snapshot) {
+                  if (snapshot.hasData) {
+                    return Text('${snapshot.data!.length} colors scanned',
+                        style: TextStyle(
+                          fontSize: 14,
+                          color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+                        ));
+                  }
+                  return Text('Loading...',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+                      ));
+                },
+              ),
+            ],
+          ),
+          actions: [
+            IconButton(
+              icon: Icon(Icons.delete_sweep),
+              color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+              onPressed: () {
+                _showClearHistoryDialog(context, isHighContrast);
+              },
+            ),
+          ],
+        ),
+        body: StreamBuilder<List<Map<String, dynamic>>>(
+          stream: _firebaseService.getColorHistory(userEmail!),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Center(
+                child: CircularProgressIndicator(
+                  color: isHighContrast ? HighContrastTheme.primary : Colors.blue,
+                ),
+              );
+            }
+
+            if (snapshot.hasError) {
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.error_outline,
+                        size: 80,
+                        color: Colors.red),
+                    SizedBox(height: 16),
+                    Text(
+                      'Error loading history',
+                      style: TextStyle(
+                        color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+                        fontSize: 18,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      snapshot.error.toString(),
+                      style: TextStyle(
+                        color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+                        fontSize: 14,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            final colors = snapshot.data ?? [];
+
+            if (colors.isEmpty) {
+              return Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.color_lens_outlined,
+                        size: 80,
+                        color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary),
+                    SizedBox(height: 16),
+                    Text(
+                      'No colors scanned yet',
+                      style: TextStyle(
+                        color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+                        fontSize: 18,
+                      ),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      'Use camera or upload to detect colors',
+                      style: TextStyle(
+                        color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+                        fontSize: 14,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            return ListView.builder(
+              padding: EdgeInsets.all(16),
+              itemCount: colors.length,
+              itemBuilder: (context, index) {
+                final colorData = colors[index];
+                final colorValue = Color(colorData['color'] as int);
+
+                return FirebaseColorCard(
+                  colorValue: colorValue,
+                  colorName: colorData['colorName'] ?? 'Unknown',
+                  hex: colorData['hex'] ?? '',
+                  rgb: colorData['rgb'] ?? '',
+                  date: _formatDate(colorData['date']),
+                  colorId: colorData['id'],
+                  userEmail: userEmail!,
+                  firebaseService: _firebaseService,
+                  isHighContrast: isHighContrast,
+                );
+              },
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  String _formatDate(String? dateString) {
+    if (dateString == null) return 'Unknown date';
+    try {
+      final date = DateTime.parse(dateString);
+      return '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year} ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
+    } catch (e) {
+      return 'Unknown date';
+    }
+  }
+
+  void _showClearHistoryDialog(BuildContext context, bool isHighContrast) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: isHighContrast ? HighContrastTheme.surface : NormalTheme.surface,
+        title: Text('Clear All History?',
+            style: TextStyle(
+              color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+            )),
+        content: Text('This will permanently delete all your color history.',
+            style: TextStyle(
+              color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+            )),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel',
+                style: TextStyle(
+                  color: isHighContrast ? HighContrastTheme.textSecondary : Colors.grey,
+                )),
+          ),
+          TextButton(
+            onPressed: () async {
+              Navigator.pop(context);
+              await _firebaseService.clearAllHistory(userEmail!);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('History cleared'),
+                  backgroundColor: Colors.red,
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+            child: Text('Clear All',
+                style: TextStyle(
+                  color: Colors.red,
+                  fontWeight: isHighContrast ? FontWeight.bold : FontWeight.normal,
+                )),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// New widget for Firebase color cards
+class FirebaseColorCard extends StatelessWidget {
+  final Color colorValue;
+  final String colorName;
+  final String hex;
+  final String rgb;
+  final String date;
+  final String colorId;
+  final String userEmail;
+  final FirebaseService firebaseService;
+  final bool isHighContrast;
+
+  FirebaseColorCard({
+    required this.colorValue,
+    required this.colorName,
+    required this.hex,
+    required this.rgb,
+    required this.date,
+    required this.colorId,
+    required this.userEmail,
+    required this.firebaseService,
+    required this.isHighContrast,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isHighContrast ? HighContrastTheme.surface : NormalTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isHighContrast ? HighContrastTheme.border : NormalTheme.border,
+          width: isHighContrast ? HighContrastTheme.borderWidth : NormalTheme.borderWidth,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              color: colorValue,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isHighContrast ? HighContrastTheme.border : NormalTheme.border,
+                width: isHighContrast ? HighContrastTheme.borderWidth : NormalTheme.borderWidth,
+              ),
+            ),
+          ),
+          SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(colorName,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+                    )),
+                Text('$hex • $rgb',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+                    )),
+                Text(date,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+                    )),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.delete_outline,
+                color: isHighContrast ? HighContrastTheme.textPrimary : Colors.grey),
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  backgroundColor: isHighContrast ? HighContrastTheme.surface : NormalTheme.surface,
+                  title: Text('Delete Color?',
+                      style: TextStyle(
+                        color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+                      )),
+                  content: Text('Remove "$colorName" from history?',
+                      style: TextStyle(
+                        color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+                      )),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text('Cancel',
+                          style: TextStyle(
+                            color: isHighContrast ? HighContrastTheme.textSecondary : Colors.grey,
+                          )),
+                    ),
+                    TextButton(
+                      onPressed: () async {
+                        Navigator.pop(context);
+                        await firebaseService.deleteColor(userEmail, colorId);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Color deleted'),
+                            backgroundColor: Colors.red,
+                            duration: Duration(seconds: 1),
+                          ),
+                        );
+                      },
+                      child: Text('Delete',
+                          style: TextStyle(
+                            color: Colors.red,
+                            fontWeight: isHighContrast ? FontWeight.bold : FontWeight.normal,
+                          )),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ==================== COLOR CARD WIDGET ====================
+
+class ColorCard extends StatelessWidget {
+  final ColorItem color;
+  final VoidCallback onDelete;
+  final bool isHighContrast;
+
+  ColorCard({required this.color, required this.onDelete, required this.isHighContrast});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isHighContrast ? HighContrastTheme.surface : NormalTheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isHighContrast ? HighContrastTheme.border : NormalTheme.border,
+          width: isHighContrast ? HighContrastTheme.borderWidth : NormalTheme.borderWidth,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              color: color.color,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: isHighContrast ? HighContrastTheme.border : NormalTheme.border,
+                width: isHighContrast ? HighContrastTheme.borderWidth : NormalTheme.borderWidth,
+              ),
+            ),
+          ),
+          SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(color.name,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+                    )),
+                Text('${color.hex} • ${color.rgb}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+                    )),
+                Text(color.date,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+                    )),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: Icon(Icons.delete_outline,
+                color: isHighContrast ? HighContrastTheme.textPrimary : Colors.grey),
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  backgroundColor: isHighContrast ? HighContrastTheme.surface : NormalTheme.surface,
+                  title: Text('Delete Color?',
+                      style: TextStyle(
+                        color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+                      )),
+                  content: Text('Remove "${color.name}" from history?',
+                      style: TextStyle(
+                        color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+                      )),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context),
+                      child: Text('Cancel',
+                          style: TextStyle(
+                            color: isHighContrast ? HighContrastTheme.textSecondary : Colors.grey,
+                          )),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        onDelete();
+                      },
+                      child: Text('Delete',
+                          style: TextStyle(
+                            color: Colors.red,
+                            fontWeight: isHighContrast ? FontWeight.bold : FontWeight.normal,
+                          )),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ==================== SCREEN 2: SETTINGS ====================
+
+class SettingsScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final accessibilitySettings = Provider.of<AccessibilitySettings>(context);
+    final isHighContrast = accessibilitySettings.highContrast;
+
+    return ColorFiltered(
+      colorFilter: ColorFilter.matrix(ColorBlindFilters.getFilter(accessibilitySettings.colorVisionMode)),
+      child: Scaffold(
+        backgroundColor: isHighContrast ? HighContrastTheme.background : NormalTheme.background,
+        appBar: AppBar(
+          backgroundColor: isHighContrast ? HighContrastTheme.background : NormalTheme.background,
+          elevation: 0,
+          title: Text('Settings',
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+                color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+              )),
+        ),
+        body: ListView(
+          padding: EdgeInsets.all(16),
+          children: [
+            Text('ACCESSIBILITY',
+                style: TextStyle(
+                  color: isHighContrast ? HighContrastTheme.textSecondary : Colors.grey,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                )),
+            SizedBox(height: 12),
+            SettingCard(
+              icon: Icons.remove_red_eye,
+              iconColor: isHighContrast ? HighContrastTheme.primary : Colors.blue,
+              title: 'Color Vision',
+              subtitle: 'Adjust colors for color blindness',
+              trailing: Icon(Icons.chevron_right,
+                  color: isHighContrast ? HighContrastTheme.textSecondary : Colors.grey),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => ColorVisionScreen()),
+                );
+              },
+              isHighContrast: isHighContrast,
+            ),
+            SizedBox(height: 12),
+            SettingCard(
+              icon: Icons.contrast,
+              iconColor: isHighContrast ? HighContrastTheme.primary : Colors.purple,
+              title: 'High Contrast Mode',
+              subtitle: 'Enhanced visibility for better readability',
+              trailing: Switch(
+                value: isHighContrast,
+                onChanged: (value) {
+                  accessibilitySettings.setHighContrast(value);
+                },
+                activeColor: isHighContrast ? HighContrastTheme.primary : Colors.blue,
+              ),
+              isHighContrast: isHighContrast,
+            ),
+            SizedBox(height: 24),
+            Text('ABOUT',
+                style: TextStyle(
+                  color: isHighContrast ? HighContrastTheme.textSecondary : Colors.grey,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                )),
+            SizedBox(height: 12),
+            SettingCard(
+              icon: Icons.info_outline,
+              iconColor: isHighContrast ? HighContrastTheme.textSecondary : Colors.grey,
+              title: 'About Lumora',
+              trailing: Icon(Icons.chevron_right,
+                  color: isHighContrast ? HighContrastTheme.textSecondary : Colors.grey),
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => AboutScreen()),
+                );
+              },
+              isHighContrast: isHighContrast,
+            ),
+          ],
+        ),
+
+      ),
+    );
+  }
+}
+
+// ==================== SETTING CARD WIDGET ====================
+
+class SettingCard extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  final bool isHighContrast;
+
+  SettingCard({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    this.onTap,
+    required this.isHighContrast,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isHighContrast ? HighContrastTheme.surface : NormalTheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isHighContrast ? HighContrastTheme.border : Colors.transparent,
+            width: isHighContrast ? HighContrastTheme.borderWidth : 0,
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: iconColor.withOpacity(isHighContrast ? 0.3 : 0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(icon, color: iconColor, size: 24),
+            ),
+            SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+                      )),
+                  if (subtitle != null)
+                    Text(subtitle!,
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+                        )),
+                ],
+              ),
+            ),
+            if (trailing != null) trailing!,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==================== SCREEN 3: COLOR VISION ====================
+
+class ColorVisionScreen extends StatelessWidget {
+  final List<ColorVisionOption> options = [
+    ColorVisionOption(
+      id: 'normal',
+      name: 'Normal Vision',
+      description: 'Standard color display',
+      icon: Icons.remove_red_eye,
+    ),
+    ColorVisionOption(
+      id: 'protanopia',
+      name: 'Protanopia',
+      description: 'Red-green color blindness (no red cones)',
+      icon: Icons.visibility,
+    ),
+    ColorVisionOption(
+      id: 'deuteranopia',
+      name: 'Deuteranopia',
+      description: 'Red-green color blindness (no green cones)',
+      icon: Icons.visibility,
+    ),
+    ColorVisionOption(
+      id: 'tritanopia',
+      name: 'Tritanopia',
+      description: 'Blue-yellow color blindness',
+      icon: Icons.visibility,
+    ),
+    ColorVisionOption(
+      id: 'grayscale',
+      name: 'Grayscale',
+      description: 'Black and white mode',
+      icon: Icons.invert_colors,
+    ),
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final accessibilitySettings = Provider.of<AccessibilitySettings>(context);
+    final isHighContrast = accessibilitySettings.highContrast;
+    final currentMode = accessibilitySettings.colorVisionMode;
+
+    return ColorFiltered(
+      colorFilter: ColorFilter.matrix(ColorBlindFilters.getFilter(currentMode)),
+      child: Scaffold(
+        backgroundColor: isHighContrast ? HighContrastTheme.background : NormalTheme.background,
+        appBar: AppBar(
+          backgroundColor: isHighContrast ? HighContrastTheme.background : NormalTheme.background,
+          elevation: 0,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back,
+                color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: Text('Color Vision',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+              )),
+        ),
+        body: ListView.builder(
+          padding: EdgeInsets.all(16),
+          itemCount: options.length,
+          itemBuilder: (context, index) {
+            final option = options[index];
+            return ColorVisionOptionCard(
+              option: option,
+              isSelected: currentMode == option.id,
+              onTap: () {
+                accessibilitySettings.setColorVisionMode(option.id);
+              },
+              isHighContrast: isHighContrast,
+            );
+          },
+        ),
+      ),
+    );
+  }
+}
+
+// ==================== COLOR VISION OPTION ====================
+
+class ColorVisionOption {
+  final String id;
+  final String name;
+  final String description;
+  final IconData icon;
+
+  ColorVisionOption({
+    required this.id,
+    required this.name,
+    required this.description,
+    required this.icon,
+  });
+}
+
+class ColorVisionOptionCard extends StatelessWidget {
+  final ColorVisionOption option;
+  final bool isSelected;
+  final VoidCallback onTap;
+  final bool isHighContrast;
+
+  ColorVisionOptionCard({
+    required this.option,
+    required this.isSelected,
+    required this.onTap,
+    required this.isHighContrast,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: EdgeInsets.only(bottom: 12),
+        padding: EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: isHighContrast ? HighContrastTheme.surface : NormalTheme.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected
+                ? (isHighContrast ? HighContrastTheme.primary : Colors.blue)
+                : (isHighContrast ? HighContrastTheme.border : Colors.transparent),
+            width: isSelected ? 2.0 : (isHighContrast ? HighContrastTheme.borderWidth : 0),
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: (isHighContrast ? HighContrastTheme.primary : Colors.blue).withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(option.icon,
+                  color: isHighContrast ? HighContrastTheme.primary : Colors.blue),
+            ),
+            SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(option.name,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+                      )),
+                  Text(option.description,
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+                      )),
+                ],
+              ),
+            ),
+            if (isSelected)
+              Icon(Icons.check_circle,
+                  color: isHighContrast ? HighContrastTheme.primary : Colors.blue,
+                  size: 28),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ==================== SCREEN 4: ABOUT ====================
+
+class AboutScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final accessibilitySettings = Provider.of<AccessibilitySettings>(context);
+    final isHighContrast = accessibilitySettings.highContrast;
+
+    return ColorFiltered(
+      colorFilter: ColorFilter.matrix(ColorBlindFilters.getFilter(accessibilitySettings.colorVisionMode)),
+      child: Scaffold(
+        backgroundColor: isHighContrast ? HighContrastTheme.background : NormalTheme.background,
+        appBar: AppBar(
+          backgroundColor: isHighContrast ? HighContrastTheme.background : NormalTheme.background,
+          elevation: 0,
+          leading: IconButton(
+            icon: Icon(Icons.arrow_back,
+                color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary),
+            onPressed: () => Navigator.pop(context),
+          ),
+          title: Text('About Lumora',
+              style: TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+                color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+              )),
+        ),
+        body: SingleChildScrollView(
+          padding: EdgeInsets.all(24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  padding: EdgeInsets.all(24),
+                  decoration: BoxDecoration(
+                    gradient: isHighContrast
+                        ? LinearGradient(
+                      colors: [HighContrastTheme.primary, HighContrastTheme.primary],
+                    )
+                        : LinearGradient(
+                      colors: [Colors.blue, Colors.purple],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.color_lens,
+                      size: 64, color: isHighContrast ? Colors.black : Colors.white),
+                ),
+              ),
+              SizedBox(height: 32),
+              Text(
+                'Our Mission',
+                style: TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                  color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+                ),
+              ),
+              SizedBox(height: 16),
+              Text(
+                'To enable and recognize the true colors of the world for everyone, regardless of how they see them.',
+                style: TextStyle(
+                  fontSize: 18,
+                  color: isHighContrast ? HighContrastTheme.textSecondary : Colors.white70,
+                  height: 1.5,
+                ),
+              ),
+              SizedBox(height: 32),
+              Text(
+                'For Color Blind Community',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+                ),
+              ),
+              SizedBox(height: 16),
+              Text(
+                'We believe that color blindness shouldn\'t limit anyone from experiencing and identifying the beautiful spectrum of colors around us.',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: isHighContrast ? HighContrastTheme.textSecondary : Colors.white70,
+                  height: 1.5,
+                ),
+              ),
+              SizedBox(height: 24),
+              Text(
+                'Lumora helps you identify colors accurately, share them with confidence, and navigate a world designed with color in mind.',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: isHighContrast ? HighContrastTheme.textSecondary : Colors.white70,
+                  height: 1.5,
+                ),
+              ),
+              SizedBox(height: 32),
+              Container(
+                padding: EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: isHighContrast ? HighContrastTheme.surface : NormalTheme.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isHighContrast ? HighContrastTheme.border : Colors.transparent,
+                    width: isHighContrast ? HighContrastTheme.borderWidth : 0,
+                  ),
+                ),
+                child: Column(
+                  children: [
+                    Icon(Icons.favorite,
+                        color: isHighContrast ? HighContrastTheme.primary : Colors.red,
+                        size: 48),
+                    SizedBox(height: 16),
+                    Text(
+                      'Empowering Everyone',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      'Your trusted companion for color recognition and accessibility',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: isHighContrast ? HighContrastTheme.textSecondary : Colors.white70,
+                        height: 1.5,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(height: 32),
+              Center(
+                child: Text(
+                  'Version 1.0.0',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: isHighContrast ? HighContrastTheme.textSecondary : Colors.grey,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ==================== SCREEN 5: SCAN ====================
+
+class ScanScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final accessibilitySettings = Provider.of<AccessibilitySettings>(context);
+    final isHighContrast = accessibilitySettings.highContrast;
+
+    return ColorFiltered(
+      colorFilter: ColorFilter.matrix(ColorBlindFilters.getFilter(accessibilitySettings.colorVisionMode)),
+      child: Scaffold(
+        backgroundColor: isHighContrast ? HighContrastTheme.background : NormalTheme.background,
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.camera_alt,
+                  size: 100,
+                  color: isHighContrast ? HighContrastTheme.primary : Colors.blue),
+              SizedBox(height: 24),
+              Text(
+                'Camera Integration',
+                style: TextStyle(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: isHighContrast ? HighContrastTheme.textPrimary : NormalTheme.textPrimary,
+                ),
+              ),
+              SizedBox(height: 12),
+              Text(
+                'Your friend will implement this part',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: isHighContrast ? HighContrastTheme.textSecondary : NormalTheme.textSecondary,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+
+      ),
+    );
+  }
+}
