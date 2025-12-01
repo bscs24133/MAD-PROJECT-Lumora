@@ -1,6 +1,4 @@
-# MAD-PROJECT-Lumora
-
-# final_sem_project
+# final_mad_forebase
 
 A new Flutter project.
 
