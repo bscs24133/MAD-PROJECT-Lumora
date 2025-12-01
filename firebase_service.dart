@@ -1,32 +1,21 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 class FirebaseService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-
-  // Get current user ID
-  String? getCurrentUserId() {
-    return _auth.currentUser?.uid;
-  }
 
   // Save color to Firebase
   Future<void> saveColorToHistory({
+    required String userEmail,
     required Color color,
     required String colorName,
     required String hex,
     required String rgb,
   }) async {
     try {
-      final userId = getCurrentUserId();
-      if (userId == null) {
-        throw Exception('User not logged in');
-      }
-
       await _firestore
           .collection('users')
-          .doc(userId)
+          .doc(userEmail)
           .collection('colorHistory')
           .add({
         'color': color.value,
@@ -36,7 +25,7 @@ class FirebaseService {
         'timestamp': FieldValue.serverTimestamp(),
         'date': DateTime.now().toString(),
       });
-      print('Color saved successfully for user: $userId');
+      print('Color saved successfully');
     } catch (e) {
       print('Error saving color: $e');
       rethrow;
@@ -44,15 +33,10 @@ class FirebaseService {
   }
 
   // Get color history from Firebase
-  Stream<List<Map<String, dynamic>>> getColorHistory() {
-    final userId = getCurrentUserId();
-    if (userId == null) {
-      return Stream.value([]); // Return empty stream if user not logged in
-    }
-
+  Stream<List<Map<String, dynamic>>> getColorHistory(String userEmail) {
     return _firestore
         .collection('users')
-        .doc(userId)
+        .doc(userEmail)
         .collection('colorHistory')
         .orderBy('timestamp', descending: true)
         .snapshots()
@@ -65,17 +49,12 @@ class FirebaseService {
     });
   }
 
-  // Delete a single color from history
-  Future<void> deleteColor(String colorId) async {
+  // Delete color from history
+  Future<void> deleteColor(String userEmail, String colorId) async {
     try {
-      final userId = getCurrentUserId();
-      if (userId == null) {
-        throw Exception('User not logged in');
-      }
-
       await _firestore
           .collection('users')
-          .doc(userId)
+          .doc(userEmail)
           .collection('colorHistory')
           .doc(colorId)
           .delete();
@@ -86,24 +65,19 @@ class FirebaseService {
     }
   }
 
-  // Clear all color history for the user
-  Future<void> clearAllHistory() async {
+  // Clear all color history
+  Future<void> clearAllHistory(String userEmail) async {
     try {
-      final userId = getCurrentUserId();
-      if (userId == null) {
-        throw Exception('User not logged in');
-      }
-
       final snapshot = await _firestore
           .collection('users')
-          .doc(userId)
+          .doc(userEmail)
           .collection('colorHistory')
           .get();
 
       for (var doc in snapshot.docs) {
         await doc.reference.delete();
       }
-      print('All history cleared for user: $userId');
+      print('All history cleared');
     } catch (e) {
       print('Error clearing history: $e');
       rethrow;

@@ -10,9 +10,10 @@ import 'package:image/image.dart' as img;
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import 'home_screen.dart';
+import 'camera_upload.dart';
 import 'package:provider/provider.dart';
 import 'settingandhistory.dart';
+import 'quiz.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -812,3 +813,414 @@ class LumoraAppMain extends StatelessWidget {
   }
 }
 
+/// -------------------
+/// HOME SCREEN
+/// -------------------
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  @override
+
+  Widget build(BuildContext context) {
+    final accessibilitySettings = Provider.of<AccessibilitySettings>(context);
+    final isHighContrast = accessibilitySettings.highContrast;
+    final colorVisionMode = accessibilitySettings.colorVisionMode;
+
+    return ColorFiltered(
+      colorFilter: ColorFilter.matrix(ColorBlindFilters.getFilter(colorVisionMode)),
+      child: Scaffold(
+        backgroundColor: isHighContrast ? HighContrastTheme.background : Colors.black,
+
+
+        drawer: Drawer(
+          backgroundColor: const Color(0xFF0F1A2E),
+          child: Column(
+            children: [
+              DrawerHeader(
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [Color(0xFF0A1128), Color(0xFF0F1A2E)],
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF60A5FA), Color(0xFF3B82F6)],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.remove_red_eye, color: Colors.white, size: 24),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      "Lumora",
+                      style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+                    ),
+                    const Text(
+                      "Color Detection Pro",
+                      style: TextStyle(color: Colors.white54, fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.history, color: Colors.white70),
+                title: const Text('History', style: TextStyle(color: Colors.white, fontSize: 16)),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => ColorHistoryScreen()));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.psychology, color: Colors.white70),
+                title: const Text('Color Vision Test', style: TextStyle(color: Colors.white, fontSize: 16)),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const ColorVisionTest()));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.settings, color: Colors.white70),
+                title: const Text('Settings', style: TextStyle(color: Colors.white, fontSize: 16)),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => SettingsScreen()));
+                },
+              ),
+              const Divider(color: Colors.white24, thickness: 1, indent: 16, endIndent: 16),
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.white70),
+                title: const Text('Log Out', style: TextStyle(color: Colors.white, fontSize: 16)),
+                onTap: () async {
+                  SharedPreferences prefs = await SharedPreferences.getInstance();
+
+                  // Just mark as logged out - keep all users
+                  prefs.setBool("loggedIn", false);
+                  prefs.remove("activeEmail");
+                  // DON'T remove users - they stay in storage
+
+                  // Show a confirmation message or just close the drawer
+                  Navigator.pop(context); // Close the drawer
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Logged out successfully')),
+                  );
+                },
+              ),
+
+// Add this new tile to go to the starting page
+              ListTile(
+                leading: const Icon(Icons.login, color: Colors.white70),
+                title: const Text('Log In', style: TextStyle(color: Colors.white, fontSize: 16)),
+                onTap: () {
+                  Navigator.pushAndRemoveUntil(
+                    context,
+                    MaterialPageRoute(builder: (_) => AuthWelcomeScreen()),
+                        (route) => false,
+                  );
+                },
+              ),
+              const Spacer(),
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Text(
+                  'Lumora v1.0.0\n© 2024 Lumora Technologies',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.white38, fontSize: 10),
+                ),
+              ),
+            ],
+          ),
+        ),
+        body: SafeArea(
+          child: Column(
+            children: [
+              // Top Bar
+              Container(
+                height: 80,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                decoration: const BoxDecoration(
+                  border: Border(bottom: BorderSide(color: Color(0xFF1F1F1F))),
+                ),
+                child: Row(
+                  children: [
+                    // Menu Button
+                    Builder(
+                      builder: (context) => Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF3B82F6).withOpacity(0.2),
+                          border: Border.all(color: const Color(0xFF3B82F6).withOpacity(0.4), width: 2),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: IconButton(
+                          icon: const Icon(Icons.menu, color: Color(0xFF60A5FA), size: 28),
+                          onPressed: () => Scaffold.of(context).openDrawer(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    // Logo and Status
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF60A5FA), Color(0xFF3B82F6)],
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.remove_red_eye, color: Colors.white, size: 20),
+                    ),
+                    const SizedBox(width: 12),
+                    Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Lumora',
+                          style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                        ),
+                        Row(
+                          children: [
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF3B82F6),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            const Text(
+                              'Ready to Scan',
+                              style: TextStyle(color: Colors.white54, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                    const Spacer(),
+                    GestureDetector(
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => UserInfoListScreen()),
+                        );
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF3B82F6).withOpacity(0.1),
+                          border: Border.all(color: const Color(0xFF3B82F6).withOpacity(0.2)),
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          children: const [
+                            Text(
+                              'User',
+                              style: TextStyle(color: Color(0xFF60A5FA), fontSize: 12, fontWeight: FontWeight.w600),
+                            ),
+                            SizedBox(width: 4),
+                            Icon(Icons.people, color: Color(0xFF60A5FA), size: 14),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                  ],
+                ),
+              ),
+              // Main Content
+              Expanded(
+                child: Center(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        // Welcome Section
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: const [
+                            Icon(Icons.auto_awesome, color: Color(0xFF60A5FA), size: 24),
+                            SizedBox(width: 8),
+                            Text(
+                              'WELCOME TO',
+                              style: TextStyle(
+                                color: Color(0xFF60A5FA),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                letterSpacing: 2,
+                              ),
+                            ),
+                            SizedBox(width: 8),
+                            Icon(Icons.auto_awesome, color: Color(0xFF60A5FA), size: 24),
+                          ],
+                        ),
+                        const SizedBox(height: 24),
+                        const Text(
+                          'LUMORA',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 72,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -2,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          width: 200,
+                          height: 2,
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [Colors.transparent, Color(0xFF3B82F6), Colors.transparent],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        const Text(
+                          'Advanced Color Vision & Detection System',
+                          style: TextStyle(color: Colors.white54, fontSize: 18, fontWeight: FontWeight.w300),
+                        ),
+                        const SizedBox(height: 12),
+                        const Text(
+                          'Identify colors with precision • Test your vision • Explore palettes',
+                          style: TextStyle(color: Colors.white38, fontSize: 12),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 60),
+
+                        // Action Cards
+                        Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 24),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () async {
+                                    final status = await Permission.camera.request();
+                                    if (status.isGranted) {
+                                      final cameras = await availableCameras();
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => CameraScannerPage(cameras: cameras),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  child: _buildActionCard(
+                                    icon: Icons.camera_alt,
+                                    title: 'Camera',
+                                    description: 'Point and scan any object to detect colors instantly in real-time',
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: GestureDetector(
+                                  onTap: () async {
+                                    final picker = ImagePicker();
+                                    final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+                                    if (image != null) {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => UploadResultScreen(imageFile: File(image.path)),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                  child: _buildActionCard(
+                                    icon: Icons.upload_file,
+                                    title: 'Upload',
+                                    description: 'Upload images to extract and analyze complete color palettes',
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 60),
+
+                        // Stats
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _buildStat('16M+', 'Colors'),
+                            Container(width: 1, height: 48, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 24)),
+                            _buildStat('99%', 'Accuracy'),
+                            Container(width: 1, height: 48, color: Colors.white24, margin: const EdgeInsets.symmetric(horizontal: 24)),
+                            _buildStat('Instant', 'Detection'),
+
+
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+  Widget _buildActionCard({required IconData icon, required String title, required String description}) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF0A1128), Color(0xFF0F1A2E)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: const Color(0xFF1E40AF).withOpacity(0.3), width: 2),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 80,
+            height: 80,
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF60A5FA), Color(0xFF3B82F6)],
+              ),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Icon(icon, color: Colors.white, size: 40),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            title,
+            style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            description,
+            style: const TextStyle(color: Colors.white54, fontSize: 13),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStat(String value, String label) {
+    return Column(
+      children: [
+        Text(value, style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text(label, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+      ],
+    );
+  }
+}
